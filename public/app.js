@@ -106,23 +106,6 @@ function loadGoogle(key) {
 }
 
 function initMaps() {
-  // One panorama object for the whole game: each round just points it at a new panorama id.
-  panorama = new google.maps.StreetViewPanorama($('#pano'), {
-    addressControl: false,
-    showRoadLabels: false,
-    fullscreenControl: false,
-    enableCloseButton: false,
-    imageDateControl: false,
-    motionTracking: false,
-    motionTrackingControl: false,
-    visible: true,
-  });
-  panorama.addListener('status_changed', () => {
-    const status = panorama.getStatus();
-    if (status && status !== 'OK') notice('Street View is not available at this spot.', 'pano');
-    else clearNotice('pano');
-  });
-
   guessMap = new google.maps.Map($('#guess-map'), {
     center: { lat: 20, lng: 0 },
     zoom: 1,
@@ -201,14 +184,6 @@ function startRound(round) {
 
   const mode = state.game.settings.movement;
   document.body.dataset.movement = mode;
-  panorama.setOptions({
-    linksControl: mode === 'move',
-    clickToGo: mode === 'move',
-    panControl: mode !== 'nmpz',
-    zoomControl: mode !== 'nmpz',
-    scrollwheel: mode !== 'nmpz',
-    disableDoubleClickZoom: mode === 'nmpz',
-  });
   guessMap.setCenter({ lat: 20, lng: 0 });
   guessMap.setZoom(1);
   $('#guess-btn').disabled = true;
@@ -222,21 +197,63 @@ function startRound(round) {
   startTimer(round);
 }
 
+// The panorama object is created on the first round, once its container is on screen: a Street View
+// created inside a hidden container can stay blank. The same object is then reused for every round.
+function ensurePanorama(panoId, heading) {
+  if (panorama) return;
+  panorama = new google.maps.StreetViewPanorama($('#pano'), {
+    pano: panoId,
+    pov: { heading, pitch: 0 },
+    zoom: 1,
+    addressControl: false,
+    showRoadLabels: false,
+    fullscreenControl: false,
+    enableCloseButton: false,
+    imageDateControl: false,
+    motionTracking: false,
+    motionTrackingControl: false,
+    visible: true,
+  });
+  panorama.addListener('status_changed', () => {
+    const status = panorama.getStatus();
+    console.info('[guessgeo] panorama status', status);
+    if (status && status !== 'OK') notice('Street View is not available at this spot.', 'pano');
+    else clearNotice('pano');
+  });
+}
+
 // Ask Street View for the panorama first, so a failure says why instead of showing a blank page.
 function loadPanorama(round) {
   const roundNo = round.round_no;
+  const slow = setTimeout(() => notice('Street View is taking a long time to answer. Check your connection.', 'pano'), 10_000);
   new google.maps.StreetViewService().getPanorama({ pano: round.pano_id }, (data, status) => {
+    clearTimeout(slow);
     if (state.round?.round_no !== roundNo) return;
+    console.info('[guessgeo] street view lookup', status, round.pano_id);
     if (status !== google.maps.StreetViewStatus.OK || !data?.location?.pano) {
-      console.error('Street View lookup failed', status, round.pano_id);
       notice(`Street View could not load this spot (${status}).`, 'pano');
       return;
     }
+    const heading = round.heading;
+    ensurePanorama(data.location.pano, heading);
+    panorama.setOptions(panoOptionsFor(state.game.settings.movement));
     panorama.setPano(data.location.pano);
-    panorama.setPov({ heading: round.heading, pitch: 0 });
+    panorama.setPov({ heading, pitch: 0 });
     panorama.setZoom(1);
     panorama.setVisible(true);
+    google.maps.event.trigger(panorama, 'resize');
   });
+}
+
+function panoOptionsFor(mode) {
+  return {
+    linksControl: mode === 'move',
+    clickToGo: mode === 'move',
+    panControl: mode !== 'nmpz',
+    zoomControl: mode !== 'nmpz',
+    scrollwheel: mode !== 'nmpz',
+    disableDoubleClickZoom: mode === 'nmpz',
+  };
 }
 
 async function submit() {
