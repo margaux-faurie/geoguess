@@ -77,7 +77,9 @@ async function api(path, init = {}) {
   }
   const body = await res.json().catch(() => ({}));
   // 410 means time ran out: the body still carries the round's result, so it is not an error here.
-  if (!res.ok && res.status !== 410) throw new Error(body.message || 'Something went wrong. Try again.');
+  if (!res.ok && res.status !== 410) {
+    throw Object.assign(new Error(body.message || 'Something went wrong. Try again.'), { status: res.status });
+  }
   return { status: res.status, body };
 }
 
@@ -91,10 +93,12 @@ function remembered() {
 function loadGoogle(key) {
   return new Promise((resolve, reject) => {
     window.__mapsReady = resolve;
-    window.gm_authFailure = () =>
+    window.gm_authFailure = () => {
       notice('Google rejected the Maps key. Check that it allows this address and the Maps JavaScript API.', 'key');
+      $('#setup-form button').disabled = true; // a game on a blank panorama would only waste quota
+    };
     const s = document.createElement('script');
-    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&v=weekly&callback=__mapsReady`;
+    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&v=quarterly&callback=__mapsReady`;
     s.async = true;
     s.onerror = () => reject(new Error('Could not load Google Maps.'));
     document.head.append(s);
@@ -252,6 +256,25 @@ async function submit() {
   } catch (e) {
     state.busy = false;
     notice(e.message);
+    if (e.status === 409) return resync(); // another tab already moved this game on
+    // Network or server hiccup: give the clock back (and retry soon if time is already up).
+    setTimeout(() => {
+      if (document.body.dataset.view === 'play' && !state.busy) startTimer(state.round);
+    }, 2000);
+  }
+}
+
+async function resync() {
+  try {
+    const { body } = await api(`/api/games/${state.game.id}`);
+    if (body.status === 'in_progress') beginGame(body, true);
+    else {
+      state.results = body.results;
+      state.game.total = body.total_score;
+      showSummary();
+    }
+  } catch (e) {
+    notice(e.message);
   }
 }
 
@@ -288,7 +311,7 @@ function showResult(res) {
   $('#next').onclick = () => {
     clearNotice('timeout');
     if (res.finished) showSummary();
-    else startRound(res.next);
+    else enterRound(res.next_round_no);
   };
   $('#next').focus();
 }
@@ -324,7 +347,22 @@ function beginGame(view, resumed = false) {
   state.results = resumed ? view.results : [];
   state.clockOffset = view.server_now - Date.now();
   remember(view.game_id);
-  startRound(view.current_round);
+  const round = view.current_round;
+  // A round that has not started has no panorama yet: ask the server to start its clock now.
+  if (round.pano_id) startRound(round);
+  else enterRound(round.round_no);
+}
+
+async function enterRound(roundNo) {
+  setView('loading');
+  try {
+    const { body } = await api(`/api/games/${state.game.id}/rounds/${roundNo}/start`, { method: 'POST', body: '{}' });
+    state.clockOffset = body.server_now - Date.now();
+    startRound(body);
+  } catch (e) {
+    notice(e.message);
+    setView('setup');
+  }
 }
 
 async function boot() {
@@ -344,8 +382,10 @@ async function boot() {
       try {
         const { body } = await api(`/api/games/${lastId}`);
         if (body.status === 'in_progress') return beginGame(body, true);
-      } catch { /* the saved game is gone: start fresh */ }
-      remember(null);
+        remember(null);
+      } catch (e) {
+        if (e.status === 404) remember(null); // gone for good; any other error may be temporary, so keep it
+      }
     }
     setView('setup');
   } catch (e) {

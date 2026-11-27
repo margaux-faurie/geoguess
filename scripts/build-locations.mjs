@@ -17,10 +17,15 @@ import { EARTH_RADIUS_KM, haversineKm } from '../src/scoring.js';
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
 loadEnv(resolve(ROOT, '.env'));
 
+// Options are written --name=value.
 const args = Object.fromEntries(
   process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => a.slice(2).split('=')),
 );
 const target = Number(args.count ?? 200);
+if (!Number.isInteger(target) || target < 1) {
+  console.error('Use --count=<whole number>, for example --count=300.');
+  process.exit(1);
+}
 const outFile = resolve(ROOT, args.out ?? 'data/locations.json');
 const MIN_GAP_KM = 0.5;
 const SNAP_RADIUS_M = 10_000;
@@ -63,9 +68,15 @@ async function lookup({ lat, lng }, retry = true) {
     source: 'outdoor',
     key,
   }).toString();
-  const res = await fetch(url);
-  const data = await res.json();
-  if (data.status === 'UNKNOWN_ERROR' && retry) {
+  let data;
+  try {
+    const res = await fetch(url);
+    // A non-JSON or HTTP error answer counts as "no result for this point", not as a crash that loses the run.
+    data = res.ok ? await res.json() : { status: `HTTP_${res.status}` };
+  } catch {
+    data = { status: 'NETWORK_ERROR' };
+  }
+  if ((data.status === 'UNKNOWN_ERROR' || data.status === 'NETWORK_ERROR') && retry) {
     await sleep(500);
     return lookup({ lat, lng }, false);
   }

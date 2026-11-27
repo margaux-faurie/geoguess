@@ -71,6 +71,7 @@ test('worker app: Access login required, games are per user, a full guess works'
   assert.equal((await call(`/api/games/${game.game_id}`, 'alice')).status, 200);
   assert.equal((await call(`/api/games/${game.game_id}`, 'bob')).status, 404);
 
+  assert.equal((await call(`/api/games/${game.game_id}/rounds/1/start`, 'alice', { method: 'POST', body: '{}' })).status, 200);
   const guess = await call(`/api/games/${game.game_id}/rounds/1/guess`, 'alice', {
     method: 'POST',
     body: JSON.stringify({ guess: { lat: 0, lng: 0 } }),

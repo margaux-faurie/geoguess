@@ -62,12 +62,16 @@ test('play a full game over HTTP', async () => {
     const created = await call('/api/games', { method: 'POST', body: JSON.stringify({ settings: { rounds: 3 } }) });
     assert.equal(created.status, 201);
     const id = created.body.game_id;
-    assert.equal(created.body.current_round.round_no, 1);
     assert.ok(!/"lat"|"lng"/.test(created.text), 'no coordinates in the start response');
+
+    assert.deepEqual(created.body.current_round, { round_no: 1, started_at: null }, 'no panorama before the round starts');
 
     let last;
     for (let n = 1; n <= 3; n++) {
       clock.t += 1500;
+      const started = await call(`/api/games/${id}/rounds/${n}/start`, { method: 'POST', body: '{}' });
+      assert.equal(started.status, 200);
+      assert.equal(typeof started.body.pano_id, 'string');
       last = await call(`/api/games/${id}/rounds/${n}/guess`, { method: 'POST', body: JSON.stringify({ guess: { lat: 5, lng: 5 } }) });
       assert.equal(last.status, 200);
       assert.equal(typeof last.body.score, 'number');
@@ -98,11 +102,13 @@ test('errors: bad json, unknown route, foreign game, rate limits', async () => {
     // fresh player so the original cookie logic does not interfere
     const mine = await call('/api/games', { method: 'POST', body: '{}' });
     const mid = mine.body.game_id;
+    await call(`/api/games/${mid}/rounds/1/start`, { method: 'POST', body: '{}' });
     const g1 = await call(`/api/games/${mid}/rounds/1/guess`, { method: 'POST', body: JSON.stringify({ guess: null }) });
     assert.equal(g1.status, 200);
     const g2 = await call(`/api/games/${mid}/rounds/2/guess`, { method: 'POST', body: JSON.stringify({ guess: null }) });
     assert.equal(g2.status, 429, 'second guess within a second');
     clock.t += 1100;
+    await call(`/api/games/${mid}/rounds/2/start`, { method: 'POST', body: '{}' });
     const g3 = await call(`/api/games/${mid}/rounds/2/guess`, { method: 'POST', body: JSON.stringify({ guess: null }) });
     assert.equal(g3.status, 200);
 

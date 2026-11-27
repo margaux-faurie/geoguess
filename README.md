@@ -15,27 +15,34 @@ Milestone 1 of the spec: one World map, Classic mode, guest play, server-side sc
 5. `npm run locations` builds `data/locations.json` (200 real panoramas, found with the free metadata API).
 6. `npm start`, then open http://localhost:3000.
 
-`npm test` runs the server tests. They never call Google.
+`npm test` runs the server tests (54). They never call Google. The D1 tests use Node's built-in SQLite and are skipped before Node 22.5.
 
 ## How it works
 
 - The server picks the locations when a game starts and keeps the true coordinates. The browser only gets a panorama id and a starting heading. The coordinates come back after the guess.
 - Score per round: `5000 * e^(-10 d / D)` with `d` the miss in km and `D` the map's scale (14,917 km for the World map). A guess within 25 m is a perfect 5,000. Distance is haversine. Both live in `src/scoring.js`, the only place scores are computed.
-- Timer: the server stamps each round and accepts a guess up to 2 seconds after the limit. Later than that scores 0 (HTTP 410, the answer is still revealed). One guess per round, in order.
+- Timer: the clock of a round starts when the player's browser asks for it (`POST /api/games/:id/rounds/:n/start`), so reading a result never costs time, and the panorama id is not revealed before that. The server accepts a guess up to 2 seconds after the limit. Later than that scores 0 (HTTP 410, the answer is still revealed). One guess per round, in order. Only an explicit `{"guess": null}` skips a round.
 - Players are guests: a random id in an httpOnly cookie. A game belongs to its id, so nobody can read another player's game.
-- Limits: 30 new games an hour per player, one guess a second per game.
+- Limits: 30 new games an hour per player and 90 per client address, one guess a second per game. POSTs must be same-origin `application/json` bodies of at most 10,000 bytes.
+- Games keep the map's scale from when they started. Pages carry security headers (`src/security-headers.js`, mirrored in `public/_headers`); the CSP is report-only until the browser console shows no violations with the live Maps scripts, then rename it to `Content-Security-Policy`.
+- The dev server listens on 127.0.0.1 only (`HOST=0.0.0.0` to share it on your network).
 
 ```
 src/scoring.js   haversine + score        (no Node imports)
 src/game.js      rounds, deadlines, rules (no Node imports)
 src/app.js       /api routes, Request -> Response (no Node imports)
-src/store.js     memory and JSON-file stores, optimistic concurrency
+src/maps.js      validation of data/locations.json (no Node imports)
+src/store.js     memory and JSON-file stores, optimistic concurrency (dev)
+src/d1-store.js  the same store contract on Cloudflare D1
+src/access.js    Cloudflare Access JWT verification
+src/edge.js      wires Access + D1 + game rules for the Worker
+src/worker.js    Worker entry
 src/server.js    local dev server: static files + the app
 scripts/build-locations.mjs   free metadata API -> data/locations.json
 public/          the client (Street View, guess map, results)
 ```
 
-`scoring.js`, `game.js` and `app.js` use only web-standard APIs, so they run unchanged in a Cloudflare Worker.
+Everything except `store.js`, `server.js` and the scripts uses only web-standard APIs, so it runs unchanged in a Cloudflare Worker.
 
 ## Not verified yet
 
@@ -54,8 +61,9 @@ Built and tested without a Google key or a browser, so these are untested:
 
 ## Next
 
-- Deploy as a Worker `guessgeo` on guessgeo.margauxfaurie.com: static files from `public/`, `/api/*` through `src/app.js`, games in D1 (a store with the same `get`/`put` as `src/store.js`), locations bundled from `data/locations.json`.
-- Accounts: the wildcard Access app already covers `*.margauxfaurie.com`, so friends in the Portfolio Visitors policy can be identified from the Access header (change `identify` in `src/app.js`). Public sign-up would need its own auth.
+- Deploy the Worker (below). Public sign-up would need its own auth instead of Access.
+- Abandoned games are never deleted yet; add a retention rule in D1 before opening the game beyond friends.
+- The pool of 200 locations can be harvested by skipping rounds (the answer is revealed). Fine for friends; before leaderboards, use a much larger pool and exclude spots a player has already seen.
 - Daily challenge, leaderboards, challenge links (spec milestones 4 and 5).
 - Design system: see `docs/design-notes.md`.
 
@@ -72,4 +80,4 @@ so it stays out of git: deploy from the machine that generated it.
 4. `npx wrangler secret put GOOGLE_MAPS_API_KEY` (the browser key; add `https://guessgeo.margauxfaurie.com/*` to its allowed sites).
 5. `npx wrangler deploy`, then attach the `guessgeo.margauxfaurie.com` custom domain to the Worker.
 
-Not verified yet: none of this has been deployed. Rate limits are per Worker instance, so they are approximate.
+Not verified yet: none of this has been deployed. Rate limits are per Worker instance, so they are approximate; Access plus the per-address limit is what protects the quota.
