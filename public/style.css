@@ -25,6 +25,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { height: 100%; margin: 0; }
 body { background: var(--paper); color: var(--ink); font: 400 17px/1.6 var(--sans); overflow: hidden; }
 

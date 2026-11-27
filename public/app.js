@@ -222,17 +222,21 @@ function loadPanorama(round) {
 }
 
 async function replaceDeadRound(round) {
+  stopTimer(); // the dead round's clock must not fire a skip while the server finds a new place
   notice('That spot is gone from Street View. Finding another one…', 'pano');
   try {
     const { body } = await api(`/api/games/${state.game.id}/rounds/${round.round_no}/replace`, {
       method: 'POST',
       body: JSON.stringify({ failed_pano_id: round.pano_id }),
     });
+    if (state.round !== round || document.body.dataset.view !== 'play') return; // the player moved on
     state.clockOffset = body.server_now - Date.now();
     if (body.pano_id === round.pano_id) throw new Error('No other spot is available. Skip this round.');
     startRound(body);
   } catch (e) {
     notice(e.message, 'pano');
+    if (e.status === 409) return resync();
+    startTimer(round);
   }
 }
 

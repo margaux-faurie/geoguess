@@ -70,3 +70,11 @@ test('no spare location left: the replacement is refused', async () => {
   const r3 = await service.startRound(ME, g.game_id, 3);
   await rejects(service.replaceRound(ME, g.game_id, 3, r3.pano_id), 409, 'no_spare_location');
 });
+
+test('no replacement once the round is out of time', async () => {
+  const { service, clock } = fixtureService();
+  const g = await service.startGame(ME, { settings: { time_limit_s: 30 } });
+  const r1 = await service.startRound(ME, g.game_id, 1);
+  clock.t += 33_000;
+  await rejects(service.replaceRound(ME, g.game_id, 1, r1.pano_id), 409, 'deadline_passed');
+});
