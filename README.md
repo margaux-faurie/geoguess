@@ -39,19 +39,23 @@ src/edge.js      wires Access + D1 + game rules for the Worker
 src/worker.js    Worker entry
 src/server.js    local dev server: static files + the app
 scripts/build-locations.mjs   free metadata API -> data/locations.json
-public/          the client (Street View, guess map, results)
+public/app.js    the client: views, Street View, rounds, results
+public/guessmap.js  the MapLibre guess map and great-circle lines
 ```
 
 Everything except `store.js`, `server.js` and the scripts uses only web-standard APIs, so it runs unchanged in a Cloudflare Worker.
 
-## Not verified yet
+## The guess map
 
-Built and tested without a Google key or a browser, so these are untested:
+MapLibre GL 5.24.1 on [OpenFreeMap](https://openfreemap.org) tiles (OpenStreetMap data): free, no key, no account. The library is loaded from jsDelivr with a pinned version and a Subresource Integrity hash, so a changed file is refused by the browser. To upgrade, change the version in `public/index.html` and recompute both hashes. Each player's browser asks OpenFreeMap for tiles directly (their address and the page origin, not the game).
 
-- The client against the real Street View and Maps APIs: panorama display, the guess map, the paper map style, marker and line drawing, the result view.
-- The movement modes: hiding links and click-to-go, the overlay for no moving/panning/zooming, and the keyboard blocking.
-- Billing: whether reusing one panorama object across rounds counts as one load or one per round. Watch the first day's usage in Google Cloud.
-- A panorama that was removed since `npm run locations` shows "Street View is not available at this spot." There is no skip without penalty yet. Re-run the builder now and then.
+Terms: the billing account is in France, so the Google Maps Platform EEA terms apply. They let you use Google content next to a third-party map at your own discretion, unlike the global terms, which forbid Street View and a non-Google map on one screen. One clause still needs a decision: the EEA terms say Street View Static API content may not be used with any map, and `npm run locations` takes the true coordinates from the Street View Static metadata endpoint. The panorama shown in the game comes from the Maps JavaScript API. Not legal advice; see the open question in the work log.
+
+## Tested in a browser (27 Nov 2026)
+
+A full five-round game on the local server: panorama display, compass, Back to start, pin and Guess (click and Space), result view with the great-circle line, Next (click and Enter), resume after reload, game-over map.
+
+Not tested yet: the No moving and No moving/panning/zooming modes, the timer running out, phone screens, and the Worker on Cloudflare. Billing: watch the first day's usage in Google Cloud. A panorama removed since `npm run locations` shows "Street View is not available at this spot"; there is no free skip yet.
 
 ## Known limits
 
@@ -73,13 +77,13 @@ The API runs as a Worker (`src/worker.js`), games live in D1, players are identi
 `data/locations.json` is generated on your machine and bundled at deploy time. It holds the true coordinates,
 so it stays out of git: deploy from the machine that generated it.
 
-1. `npx wrangler d1 create guessgeo`, then put the returned id in `wrangler.toml`.
-2. `npx wrangler d1 migrations apply guessgeo --remote`
+1. `npx wrangler@4 d1 create guessgeo`, then put the returned id in `wrangler.toml`.
+2. `npx wrangler@4 d1 migrations apply guessgeo --remote`
 3. In Zero Trust > Access > Applications, create an application for `guessgeo.margauxfaurie.com` only (not the wildcard:
    its AUD tag would accept a token issued for any other subdomain), allow your friends, then fill `ACCESS_TEAM_DOMAIN`
    and `ACCESS_AUD` in `wrangler.toml`. Without them the API refuses every request.
-4. `npx wrangler secret put GOOGLE_MAPS_API_KEY` (the browser key; add `https://guessgeo.margauxfaurie.com/*` to its allowed sites).
-5. `npx wrangler deploy`. `wrangler.toml` declares the custom domain and turns off the public workers.dev and preview addresses.
-6. Before the first real game, try one create / start / guess with `npx wrangler dev --remote`: the D1 store has only been tested against Node's SQLite, not Cloudflare's own result format.
+4. `npx wrangler@4 secret put GOOGLE_MAPS_API_KEY` (the browser key; add `https://guessgeo.margauxfaurie.com/*` to its allowed sites).
+5. `npx wrangler@4 deploy`. `wrangler.toml` declares the custom domain and turns off the public workers.dev and preview addresses.
+6. Before the first real game, try one create / start / guess with `npx wrangler@4 dev --remote`: the D1 store has only been tested against Node's SQLite, not Cloudflare's own result format.
 
 Not verified yet: none of this has been deployed. Rate limits are per Worker instance, so they are approximate; Access plus the per-address limit is what protects the quota.

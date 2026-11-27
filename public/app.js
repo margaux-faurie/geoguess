@@ -22,6 +22,7 @@ const state = {
 let panorama;
 let guessMap;
 let summaryMap;
+let resultShownAt = 0;
 let startPano = null; // where the round began, for "Back to start"
 let noticeKey = '';
 
@@ -88,7 +89,7 @@ function loadGoogle(key) {
 }
 
 function initMaps() {
-  guessMap = createGuessMap($('#guess-map'), { onPick: placePin });
+  guessMap = createGuessMap($('#guess-map'), { onPick: placePin, onError: (m) => notice(m, 'map') });
 
   // Keep the keyboard from moving the player when movement is off.
   $('#pano').addEventListener('keydown', (e) => {
@@ -106,7 +107,7 @@ function initMaps() {
 }
 
 function placePin(latLng) {
-  if (document.body.dataset.view !== 'play' || state.busy) return;
+  if (document.body.dataset.view !== 'play' || state.busy) return false;
   state.pin = latLng;
   $('#guess-btn').disabled = false;
   $('#guess-btn').textContent = 'Guess';
@@ -181,12 +182,15 @@ function ensurePanorama(panoId, heading) {
   });
   panorama.addListener('status_changed', () => {
     const status = panorama.getStatus();
-    console.info('[guessgeo] panorama status', status);
     if (status && status !== 'OK') notice('Street View is not available at this spot.', 'pano');
     else clearNotice('pano');
   });
+  // Keep the angle continuous so the needle never spins the long way round at north.
+  let shown = 0;
   panorama.addListener('pov_changed', () => {
-    $('#compass-needle').style.transform = `rotate(${-panorama.getPov().heading}deg)`;
+    const h = -panorama.getPov().heading;
+    shown += ((((h - shown) % 360) + 540) % 360) - 180;
+    $('#compass-needle').style.transform = `rotate(${shown}deg)`;
   });
 }
 
@@ -197,7 +201,7 @@ function loadPanorama(round) {
   new google.maps.StreetViewService().getPanorama({ pano: round.pano_id }, (data, status) => {
     clearTimeout(slow);
     if (state.round?.round_no !== roundNo) return;
-    console.info('[guessgeo] street view lookup', status, round.pano_id);
+    if (status !== google.maps.StreetViewStatus.OK) console.warn('[guessgeo] street view lookup', status);
     if (status !== google.maps.StreetViewStatus.OK || !data?.location?.pano) {
       notice(`Street View could not load this spot (${status}).`, 'pano');
       return;
@@ -228,6 +232,7 @@ function panoOptionsFor(mode) {
 async function submit() {
   if (state.busy || document.body.dataset.view !== 'play') return;
   state.busy = true;
+  guessMap.stopPicking();
   stopTimer();
   try {
     const { body } = await api(`/api/games/${state.game.id}/rounds/${state.round.round_no}/guess`, {
@@ -241,6 +246,7 @@ async function submit() {
     showResult(body);
   } catch (e) {
     state.busy = false;
+    guessMap.startPicking();
     notice(e.message);
     if (e.status === 409) return resync(); // another tab already moved this game on
     // Network or server hiccup: give the clock back (and retry soon if time is already up).
@@ -276,6 +282,7 @@ async function resync() {
 
 function showResult(res) {
   setView('result');
+  resultShownAt = performance.now(); // a key pressed just as the timer fired must not skip the result
   $('#result-round').textContent = `Round ${res.round_no} of ${state.game.roundsTotal}`;
   $('#result-title').textContent = res.distance_km === null ? 'No guess' : `${formatKm(res.distance_km)} away`;
   $('#result-score').textContent = `${fmt(res.score)} points`;
@@ -302,8 +309,9 @@ function showSummary() {
   stopTimer();
   remember(null);
   setView('summary');
-  if (!summaryMap) summaryMap = createGuessMap($('#summary-map'), { interactive: true });
+  if (!summaryMap) summaryMap = createGuessMap($('#summary-map'), { cooperative: true });
   summaryMap.showAll(state.results);
+  $('#again').focus();
   $('#summary-total').textContent = `${fmt(state.game.total)} points`;
   $('#summary-max').textContent = `Out of ${fmt(state.game.roundsTotal * MAX_ROUND_SCORE)}.`;
   $('#summary-rounds').replaceChildren(
@@ -360,15 +368,20 @@ async function boot() {
       $('#setup-form button').disabled = true;
       return;
     }
+    if (!window.maplibregl) throw new Error('Could not load the map. Check your connection and reload.');
     await loadGoogle(cfg.maps_key);
     await google.maps.importLibrary('streetView');
-    if (!window.maplibregl) throw new Error('Could not load the map. Check your connection and reload.');
     initMaps();
     const lastId = remembered();
     if (lastId) {
       try {
         const { body } = await api(`/api/games/${lastId}`);
         if (body.status === 'in_progress') return beginGame(body, true);
+        if (body.status === 'finished') {
+          state.game = { id: body.game_id, settings: body.settings, total: body.total_score, roundsTotal: body.rounds_total };
+          state.results = body.results;
+          return showSummary();
+        }
         remember(null);
       } catch (e) {
         if (e.status === 404) remember(null); // gone for good; any other error may be temporary, so keep it
@@ -403,12 +416,13 @@ $('#guess-btn').addEventListener('click', submit);
 // Space or Enter: guess once a pin is down, or go on from a result. Ignored while typing in a field.
 document.addEventListener('keydown', (e) => {
   if (e.repeat || e.altKey || e.ctrlKey || e.metaKey || !(e.key === ' ' || e.key === 'Enter')) return;
-  if (e.target.closest?.('select, input, textarea, button, a')) return;
+  if (e.defaultPrevented) return;
+  if (e.target.closest?.('select, input, textarea, button, a, summary, details, [role="button"], [role="link"]')) return;
   const view = document.body.dataset.view;
   if (view === 'play' && state.pin && !state.busy) {
     e.preventDefault();
     submit();
-  } else if (view === 'result') {
+  } else if (view === 'result' && performance.now() - resultShownAt > 400) {
     e.preventDefault();
     $('#next').click();
   }

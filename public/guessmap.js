@@ -14,10 +14,11 @@ const PAPER = '#fbf9f5';
 export function greatCircle(a, b, steps = 64) {
   const rad = Math.PI / 180;
   const [lat1, lng1, lat2, lng2] = [a.lat * rad, a.lng * rad, b.lat * rad, b.lng * rad];
-  const d = 2 * Math.asin(Math.sqrt(
+  const d = 2 * Math.asin(Math.min(1, Math.sqrt(
     Math.sin((lat2 - lat1) / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin((lng2 - lng1) / 2) ** 2,
-  ));
-  if (d < 1e-9) return [[a.lng, a.lat], [b.lng, b.lat]];
+  )));
+  // Same point, or (almost) opposite sides of the Earth where every great circle fits: a straight line.
+  if (d < 1e-9 || Math.sin(d) < 1e-6) return [[a.lng, a.lat], [b.lng, b.lat]];
   const out = [];
   let prevLng = null;
   for (let i = 0; i <= steps; i++) {
@@ -41,6 +42,7 @@ export function greatCircle(a, b, steps = 64) {
 function dot(className, label) {
   const el = document.createElement('div');
   el.className = `marker ${className}`;
+  el.setAttribute('role', 'img');
   if (label) el.setAttribute('aria-label', label);
   return el;
 }
@@ -53,7 +55,7 @@ function lineFeatures(pairs) {
 }
 
 // Creates a map in `container`. `onPick(latLng)` is called when the player clicks, if picking is on.
-export function createGuessMap(container, { onPick, interactive = true } = {}) {
+export function createGuessMap(container, { onPick, onError, interactive = true, cooperative = false } = {}) {
   const maplibregl = window.maplibregl;
   const map = new maplibregl.Map({
     container,
@@ -67,6 +69,7 @@ export function createGuessMap(container, { onPick, interactive = true } = {}) {
     pitchWithRotate: false,
     touchPitch: false,
     interactive,
+    cooperativeGestures: cooperative,
   });
   map.touchZoomRotate?.disableRotation();
   if (interactive) map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
@@ -80,6 +83,15 @@ export function createGuessMap(container, { onPick, interactive = true } = {}) {
   let markers = [];
   let pinMarker = null;
   const ready = new Promise((resolve) => map.once('load', resolve));
+  // Tiles or style unreachable: say so once instead of showing a blank map.
+  let failed = false;
+  const fail = () => {
+    if (failed) return;
+    failed = true;
+    onError?.('The map could not load. Check your connection and reload.');
+  };
+  map.on('error', (e) => { if (!map.loaded() && /style|source|tile|fetch/i.test(String(e?.error?.message ?? ''))) fail(); });
+  setTimeout(() => { if (!map.loaded() && !map.isStyleLoaded()) fail(); }, 15_000);
 
   ready.then(() => {
     map.addSource('route', { type: 'geojson', data: lineFeatures([]) });
@@ -90,11 +102,21 @@ export function createGuessMap(container, { onPick, interactive = true } = {}) {
     });
   });
 
-  map.on('click', (e) => {
+  function pick(lngLat) {
     if (!picking) return;
-    const latLng = { lat: e.lngLat.lat, lng: ((e.lngLat.lng + 540) % 360) - 180 };
+    const w = lngLat.wrap();
+    const latLng = { lat: w.lat, lng: w.lng };
+    if (onPick?.(latLng) === false) return; // the game said no (round over, guess in flight)
     setPin(latLng);
-    onPick?.(latLng);
+  }
+  map.on('click', (e) => pick(e.lngLat));
+  // Keyboard players: arrows pan the map, Enter drops the pin at its centre.
+  map.getCanvas().setAttribute('aria-label', 'Guess map. Arrow keys move, Enter drops your pin at the centre.');
+  map.getCanvas().addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || !picking) return;
+    e.preventDefault();
+    e.stopPropagation();
+    pick(map.getCenter());
   });
 
   function setPin(latLng) {
@@ -120,7 +142,10 @@ export function createGuessMap(container, { onPick, interactive = true } = {}) {
     if (!coords.length) return;
     const lngs = coords.map((p) => p[0]);
     const lats = coords.map((p) => p[1]);
-    const pad = padding ?? Math.min(80, Math.round(Math.min(container.clientWidth, container.clientHeight) / 5));
+    const auto = Math.min(80, Math.round(Math.min(container.clientWidth, container.clientHeight) / 5));
+    // A padding bigger than the map (a short phone screen) makes fitBounds give up: fall back.
+    const fits = padding && padding.top + padding.bottom < container.clientHeight * 0.8 && padding.left + padding.right < container.clientWidth * 0.8;
+    const pad = fits ? padding : auto;
     map.fitBounds([[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]], { padding: pad, maxZoom, duration: 600 });
   }
 
@@ -135,6 +160,8 @@ export function createGuessMap(container, { onPick, interactive = true } = {}) {
       map.jumpTo(WORLD);
     },
     setPin,
+    stopPicking() { picking = false; },
+    startPicking() { picking = true; },
     // One round's answer: the true place, the guess if any, and the line between them.
     showAnswer(guess, truth, padding) {
       picking = false;

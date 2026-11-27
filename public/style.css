@@ -133,6 +133,7 @@ body[data-movement="nmpz"] #back-to-start { display: none; }
 .tool:hover { border-color: var(--ink); }
 .hint { margin: 0; text-align: center; font: 400 12px/1.2 var(--sans); color: var(--ink-muted); }
 body[data-view="result"] .hint { display: none; }
+@media (hover: none) { .hint { display: none; } }
 
 .summary-map { height: 280px; margin: var(--space-6) 0 0; border-radius: var(--radius-card); overflow: hidden; border: 1px solid var(--ink); background: var(--paper); }
 
@@ -170,6 +171,6 @@ body[data-view="loading"] #loading { display: flex; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #guess, #guess-map, .meter i { transition: none; }
+  #guess, #guess-map, .meter i, .needle { transition: none; }
   .dots i { animation: none; opacity: 0.6; }
 }
