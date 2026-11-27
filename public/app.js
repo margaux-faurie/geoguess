@@ -205,19 +205,34 @@ function startRound(round) {
     scrollwheel: mode !== 'nmpz',
     disableDoubleClickZoom: mode === 'nmpz',
   });
-  panorama.setPano(round.pano_id);
-  panorama.setPov({ heading: round.heading, pitch: 0 });
-  panorama.setZoom(1);
-
   guessMap.setCenter({ lat: 20, lng: 0 });
   guessMap.setZoom(1);
   $('#guess-btn').disabled = true;
   $('#guess-btn').textContent = 'Place your pin';
 
   renderHud();
+  // Show the view first so the panorama is laid out before it loads.
   setView('play');
   google.maps.event.trigger(guessMap, 'resize');
+  loadPanorama(round);
   startTimer(round);
+}
+
+// Ask Street View for the panorama first, so a failure says why instead of showing a blank page.
+function loadPanorama(round) {
+  const roundNo = round.round_no;
+  new google.maps.StreetViewService().getPanorama({ pano: round.pano_id }, (data, status) => {
+    if (state.round?.round_no !== roundNo) return;
+    if (status !== google.maps.StreetViewStatus.OK || !data?.location?.pano) {
+      console.error('Street View lookup failed', status, round.pano_id);
+      notice(`Street View could not load this spot (${status}).`, 'pano');
+      return;
+    }
+    panorama.setPano(data.location.pano);
+    panorama.setPov({ heading: round.heading, pitch: 0 });
+    panorama.setZoom(1);
+    panorama.setVisible(true);
+  });
 }
 
 async function submit() {

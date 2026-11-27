@@ -37,6 +37,7 @@ body { background: var(--paper); color: var(--ink); font: 400 17px/1.6 var(--san
 .panel .small { color: var(--on-orange); }
 
 /* Pills, buttons */
+.pill[hidden] { display: none; }
 .pill {
   display: inline-block; padding: 6px var(--space-3); border-radius: var(--radius-pill);
   background: var(--paper); border: 1px solid var(--rule); font: 500 13px/1.2 var(--sans);
