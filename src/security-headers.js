@@ -8,7 +8,7 @@ export const CSP = [
   "script-src 'self' https://maps.googleapis.com",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src https://fonts.gstatic.com",
-  "img-src 'self' data: blob: https://maps.googleapis.com https://maps.gstatic.com https://*.googleusercontent.com https://*.ggpht.com",
+  "img-src 'self' data: blob: https://maps.googleapis.com https://streetviewpixels-pa.googleapis.com https://maps.gstatic.com https://*.googleusercontent.com https://*.ggpht.com",
   "connect-src 'self' https://maps.googleapis.com",
   'worker-src blob:',
   "frame-ancestors 'none'",
