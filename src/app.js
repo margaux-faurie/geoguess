@@ -9,6 +9,9 @@ const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const UUID_RE = new RegExp(`^${UUID}$`, 'i');
 const GAME_PATH = new RegExp(`^/api/games/(${UUID})$`, 'i');
 const START_PATH = new RegExp(`^/api/games/(${UUID})/rounds/(\\d{1,2})/start$`, 'i');
+const CHALLENGE_FROM_GAME = new RegExp(`^/api/games/(${UUID})/challenge$`, 'i');
+const CHALLENGE_PATH = new RegExp(`^/api/challenges/(${UUID})$`, 'i');
+const JOIN_PATH = new RegExp(`^/api/challenges/(${UUID})/join$`, 'i');
 const REPLACE_PATH = new RegExp(`^/api/games/(${UUID})/rounds/(\\d{1,2})/replace$`, 'i');
 const GUESS_PATH = new RegExp(`^/api/games/(${UUID})/rounds/(\\d{1,2})/guess$`, 'i');
 
@@ -120,6 +123,22 @@ export function createApp({
         throw new HttpError(429, 'rate_limited', 'Too many new games. Try again later.');
       }
       return { status: 201, body: await service.startGame(userId, await readJsonObject(request)) };
+    }
+    if ((m = CHALLENGE_FROM_GAME.exec(pathname)) && method === 'POST') {
+      const body = await readJsonObject(request);
+      return { status: 201, body: await service.createChallenge(userId, m[1].toLowerCase(), body.name) };
+    }
+    if ((m = CHALLENGE_PATH.exec(pathname)) && method === 'GET') {
+      return { body: await service.getChallenge(userId, m[1].toLowerCase()) };
+    }
+    if ((m = JOIN_PATH.exec(pathname)) && method === 'POST') {
+      const t = now();
+      // Joining creates a game: same limits as starting one.
+      if (!gamesPerIp.allow(clientIp(request), t) || !gamesPerUser.allow(userId, t)) {
+        throw new HttpError(429, 'rate_limited', 'Too many new games. Try again later.');
+      }
+      const body = await readJsonObject(request);
+      return { status: 201, body: await service.joinChallenge(userId, m[1].toLowerCase(), body.name) };
     }
     if ((m = GAME_PATH.exec(pathname)) && method === 'GET') {
       return { body: await service.getGame(userId, m[1].toLowerCase()) };

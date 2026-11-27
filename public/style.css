@@ -137,6 +137,23 @@ body[data-view="result"] .hint { display: none; }
 
 .summary-map { height: 280px; margin: var(--space-6) 0 0; border-radius: var(--radius-card); overflow: hidden; border: 1px solid var(--ink); background: var(--paper); }
 
+/* Challenge: scoreboard and share link */
+.challenge { margin: var(--space-6) 0; }
+input {
+  min-width: 220px; padding: 10px var(--space-3); font: 400 16px/1.2 var(--sans); color: var(--ink);
+  background: var(--paper); border: 1px solid var(--ink); border-radius: var(--radius-sm);
+}
+input:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.share-row { flex-wrap: wrap; justify-content: flex-start; }
+.share-row input { flex: 1 1 220px; }
+#board-block { margin: var(--space-6) 0; }
+.board { margin: var(--space-4) 0 0; padding: 0; list-style: none; counter-reset: place; }
+.board li { display: flex; justify-content: space-between; gap: var(--space-4); padding: var(--space-2) 0; border-bottom: 1px solid var(--ink); counter-increment: place; }
+.board li::before { content: counter(place); width: 2ch; font-weight: 700; }
+.board li .who { flex: 1; }
+.board li.me .who { font-weight: 700; }
+#invite { font-weight: 500; }
+
 /* Final list: the route line with a stop per round */
 .route { position: relative; margin: var(--space-6) 0; padding: 0 0 0 36px; list-style: none; }
 .route::before { content: ""; position: absolute; left: 6px; top: 12px; bottom: 12px; width: 3px; background: var(--ink); opacity: 0.25; border-radius: 3px; }

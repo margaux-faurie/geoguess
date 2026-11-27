@@ -26,6 +26,19 @@ export function parseSettings(input, maxRounds) {
   return { rounds, time_limit_s: timeLimit, movement };
 }
 
+/** Most players shown on one challenge. */
+export const MAX_CHALLENGE_PLAYERS = 50;
+
+/** A display name for a challenge: 1 to 20 printable characters, trimmed. */
+export function parseName(raw) {
+  const name = typeof raw === 'string' ? raw.normalize('NFC').trim().replace(/\s+/g, ' ') : '';
+  // No control or invisible formatting characters; length counted in user-perceived characters.
+  if (!name || /[\p{Cc}\p{Cf}]/u.test(name) || [...name].length > 20) {
+    throw new HttpError(400, 'bad_name', 'Pick a name of 1 to 20 characters.');
+  }
+  return name;
+}
+
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
 function parseGuess(g) {
@@ -107,6 +120,7 @@ export function createGameService({
       game_id: game.id,
       map_id: game.map_id,
       mode: game.mode,
+      challenge_id: game.challenge_id ?? null,
       settings: game.settings,
       status: game.status,
       total_score: game.total_score,
@@ -129,6 +143,57 @@ export function createGameService({
     // Same answer for "missing" and "someone else's": no way to probe other games.
     if (!game || game.user_id !== userId) throw new HttpError(404, 'not_found', 'Game not found.');
     return game;
+  }
+
+  // A new game with exactly the rounds of `source` (same places, same settings), clocks not started.
+  function copyGame(source, userId, extra) {
+    return {
+      id: newId(),
+      user_id: userId,
+      map_id: source.map_id,
+      mode: 'challenge',
+      settings: source.settings,
+      status: 'in_progress',
+      scale_km: source.scale_km,
+      total_score: 0,
+      started_at: now(),
+      version: 0,
+      ...extra,
+      rounds: source.rounds.map((r) => ({
+        round_no: r.round_no,
+        pano_id: r.pano_id,
+        heading: r.heading,
+        true_lat: r.true_lat,
+        true_lng: r.true_lng,
+        time_limit_ms: r.time_limit_ms,
+        started_at: null,
+        ends_at: null,
+        deadline_at: null,
+        guess_lat: null,
+        guess_lng: null,
+        distance_km: null,
+        score: null,
+        formula_version: FORMULA_VERSION,
+      })),
+    };
+  }
+
+  // The scoreboard: finished games only, best first. Never coordinates of rounds a viewer has not played.
+  function board(games) {
+    return games
+      .filter((g) => g.status === 'finished')
+      .map((g) => ({
+        name: g.player_name,
+        total_score: g.total_score,
+        rounds: g.rounds.map((r) => ({ score: r.score, distance_km: r.distance_km })),
+      }))
+      .sort((a, b) => b.total_score - a.total_score);
+  }
+
+  async function challengeGames(challengeId) {
+    const games = await store.listByChallenge(challengeId);
+    if (!games.length) throw new HttpError(404, 'not_found', 'Challenge not found.');
+    return games;
   }
 
   return {
@@ -177,6 +242,56 @@ export function createGameService({
 
     async getGame(userId, id) {
       return view(await ownedGame(userId, id));
+    },
+
+    /**
+     * Turn a finished game into a challenge: friends who open the link play the same rounds.
+     * Asking again returns the same challenge. The owner's name is shown on the scoreboard.
+     */
+    async createChallenge(userId, gameId, rawName) {
+      const game = await ownedGame(userId, gameId);
+      if (game.status !== 'finished') {
+        throw new HttpError(409, 'game_not_finished', 'Finish the game before challenging friends.');
+      }
+      if (game.challenge_id) return { challenge_id: game.challenge_id };
+      game.player_name = parseName(rawName);
+      game.challenge_id = newId();
+      await store.put(game);
+      return { challenge_id: game.challenge_id };
+    },
+
+    /**
+     * Join a challenge: a new game with the same rounds, or the game this player already has in it.
+     * Before finishing, a player sees how many have played, never their scores or places.
+     */
+    async joinChallenge(userId, challengeId, rawName) {
+      const games = await challengeGames(challengeId);
+      const mine = games.find((g) => g.user_id === userId);
+      if (mine) return view(mine);
+      if (games.length >= MAX_CHALLENGE_PLAYERS) {
+        throw new HttpError(409, 'challenge_full', 'This challenge is full.');
+      }
+      const game = copyGame(games[0], userId, { challenge_id: challengeId, player_name: parseName(rawName) });
+      await store.put(game);
+      return view(game);
+    },
+
+    /** What a challenge looks like to this player: the scoreboard once they have finished, a summary before. */
+    async getChallenge(userId, challengeId) {
+      const games = await challengeGames(challengeId);
+      const source = games[0];
+      const mine = games.find((g) => g.user_id === userId);
+      const done = mine?.status === 'finished';
+      return {
+        challenge_id: challengeId,
+        created_by: source.player_name,
+        settings: source.settings,
+        rounds_total: source.rounds.length,
+        players: games.filter((g) => g.status === 'finished').length,
+        my_game_id: mine?.id ?? null,
+        my_status: mine?.status ?? null,
+        board: done ? board(games) : null,
+      };
     },
 
     /**

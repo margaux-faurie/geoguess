@@ -6,6 +6,7 @@ import { HttpError } from './errors.js';
 //   get(id)   -> game | null   (a copy: mutating it changes nothing until put)
 //   put(game) -> void          optimistic concurrency: game.version must match the stored one,
 //                              otherwise 409 'conflict'. New games start at version 0.
+//   listByChallenge(id) -> games  every game played in one challenge (copies), oldest first
 
 /** The stored copy of `game` bumped by one version, or a 409 if `game` is stale. Nothing is committed here. */
 function nextVersion(games, game) {
@@ -30,7 +31,17 @@ export function createMemoryStore() {
       const next = nextVersion(games, game);
       games.set(next.id, next);
     },
+    async listByChallenge(challengeId) {
+      return byChallenge(games, challengeId);
+    },
   };
+}
+
+function byChallenge(games, challengeId) {
+  return [...games.values()]
+    .filter((g) => g.challenge_id === challengeId)
+    .sort((a, b) => a.started_at - b.started_at)
+    .map((g) => structuredClone(g));
 }
 
 /** In-memory store persisted to one JSON file (fine for a few friends). A failed write changes nothing. */
@@ -54,6 +65,9 @@ export function createFileStore(file) {
       const next = nextVersion(games, game);
       persist(new Map(games).set(next.id, next)); // disk first: if it throws, memory is untouched
       games.set(next.id, next);
+    },
+    async listByChallenge(challengeId) {
+      return byChallenge(games, challengeId);
     },
   };
 }

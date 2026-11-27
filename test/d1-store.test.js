@@ -13,7 +13,7 @@ try {
 // D1 is SQLite: wrap node:sqlite in the small slice of the D1 API the store uses.
 function fakeD1() {
   const sqlite = new DatabaseSync(':memory:');
-  sqlite.exec(readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8'));
+  for (const f of ['0001_init.sql', '0002_challenges.sql']) sqlite.exec(readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'));
   return {
     prepare(sql) {
       const stmt = sqlite.prepare(sql);
@@ -21,6 +21,7 @@ function fakeD1() {
         bind: (...args) => ({
           first: async () => stmt.get(...args) ?? null,
           run: async () => ({ meta: { changes: Number(stmt.run(...args).changes) } }),
+          all: async () => ({ results: stmt.all(...args) }),
         }),
       };
     },
@@ -60,4 +61,17 @@ test('d1 store: values with quotes and unicode are bound, not interpolated', { s
   assert.equal((await store.get("x'); DROP TABLE games;--")).user_id, 'é"u');
   await store.put(game({ id: 'g2' }));
   assert.ok(await store.get('g2'));
+});
+
+test('d1 store: games are listed by challenge, oldest first, and keep their challenge on update', { skip: !DatabaseSync }, async () => {
+  let t = 1000;
+  const store = createD1Store(fakeD1(), () => t++);
+  await store.put(game({ id: 'a', challenge_id: 'c1' }));
+  await store.put(game({ id: 'b' }));
+  await store.put(game({ id: 'c', challenge_id: 'c1' }));
+  const a = await store.get('a');
+  await store.put({ ...a, rounds: [9] });
+  assert.deepEqual((await store.listByChallenge('c1')).map((g) => g.id), ['a', 'c']);
+  assert.deepEqual((await store.listByChallenge('c1'))[0].rounds, [9]);
+  assert.deepEqual(await store.listByChallenge('nope'), []);
 });
