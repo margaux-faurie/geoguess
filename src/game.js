@@ -214,6 +214,9 @@ export function createGameService({
       if (cur.started_at === null) {
         throw new HttpError(409, 'round_not_started', 'Start the round before replacing it.');
       }
+      if (cur.deadline_at !== null && now() > cur.deadline_at) {
+        throw new HttpError(409, 'deadline_passed', 'Time already ran out for that round.');
+      }
       if (typeof failedPanoId !== 'string' || failedPanoId !== cur.pano_id) {
         // Already replaced (a retry) or a made-up id: answer with the round as it is.
         return { ...publicRound(cur), server_now: now() };
