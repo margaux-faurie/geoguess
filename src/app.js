@@ -22,10 +22,11 @@ function createLimiter({ windowMs, max }) {
 }
 
 /**
- * Who is playing. Guests get a random id kept in a cookie.
- * Swap this function for Cloudflare Access (Cf-Access-Authenticated-User-Email) or real accounts later.
+ * Default identity: guests get a random id kept in a cookie (local development).
+ * Production passes an `identify` that verifies Cloudflare Access (see src/access.js).
+ * Contract: (request, url) -> { userId, setCookie } | Promise of it; throws HttpError(401/403) to refuse.
  */
-function identify(request, url) {
+export function guestIdentity(request, url) {
   const cookie = request.headers.get('cookie') ?? '';
   const found = /(?:^|;\s*)gid=([^;]+)/.exec(cookie)?.[1];
   if (found && UUID.test(found)) return { userId: found, setCookie: null };
@@ -48,7 +49,7 @@ async function readJson(request) {
   }
 }
 
-export function createApp({ service, env = {}, now = Date.now, limits = {} }) {
+export function createApp({ service, env = {}, now = Date.now, limits = {}, identify = guestIdentity }) {
   const gameCreateLimit = createLimiter({ windowMs: 3_600_000, max: limits.gamesPerHour ?? 30 });
   const guessLimit = createLimiter({ windowMs: 1000, max: limits.guessesPerSecond ?? 1 });
 
@@ -85,11 +86,13 @@ export function createApp({ service, env = {}, now = Date.now, limits = {} }) {
 
   return async function handle(request) {
     const url = new URL(request.url);
-    const { userId, setCookie } = identify(request, url);
     let status = 200;
     let body;
+    let setCookie = null;
     try {
-      const out = await route(request, url, userId);
+      const identity = await identify(request, url);
+      setCookie = identity.setCookie;
+      const out = await route(request, url, identity.userId);
       status = out.status ?? 200;
       body = out.body;
     } catch (e) {

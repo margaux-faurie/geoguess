@@ -58,3 +58,18 @@ Built and tested without a Google key or a browser, so these are untested:
 - Accounts: the wildcard Access app already covers `*.margauxfaurie.com`, so friends in the Portfolio Visitors policy can be identified from the Access header (change `identify` in `src/app.js`). Public sign-up would need its own auth.
 - Daily challenge, leaderboards, challenge links (spec milestones 4 and 5).
 - Design system: see `docs/design-notes.md`.
+
+## Deploying to Cloudflare (guessgeo.margauxfaurie.com)
+
+The API runs as a Worker (`src/worker.js`), games live in D1, players are identified by Cloudflare Access.
+`data/locations.json` is generated on your machine and bundled at deploy time. It holds the true coordinates,
+so it stays out of git: deploy from the machine that generated it.
+
+1. `npx wrangler d1 create guessgeo`, then put the returned id in `wrangler.toml`.
+2. `npx wrangler d1 migrations apply guessgeo --remote`
+3. In Zero Trust > Access > Applications, note the team domain and the application's AUD tag, and fill
+   `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` in `wrangler.toml`. Without them the API refuses every request.
+4. `npx wrangler secret put GOOGLE_MAPS_API_KEY` (the browser key; add `https://guessgeo.margauxfaurie.com/*` to its allowed sites).
+5. `npx wrangler deploy`, then attach the `guessgeo.margauxfaurie.com` custom domain to the Worker.
+
+Not verified yet: none of this has been deployed. Rate limits are per Worker instance, so they are approximate.

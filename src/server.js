@@ -1,12 +1,13 @@
 // Local dev server: serves public/ and hands /api/* to the runtime-agnostic app.
 import http from 'node:http';
+import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createApp } from './app.js';
 import { loadEnv } from './env.js';
 import { createGameService } from './game.js';
-import { loadMaps } from './maps.js';
+import { parseMaps } from './maps.js';
 import { createFileStore } from './store.js';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -86,7 +87,8 @@ if (isMain) {
   loadEnv(join(ROOT, '.env'));
   let maps;
   try {
-    maps = loadMaps(join(ROOT, 'data', 'locations.json'));
+    const file = join(ROOT, 'data', 'locations.json');
+    maps = parseMaps(JSON.parse(readFileSync(file, 'utf8')), file);
   } catch (e) {
     console.error(`Could not load data/locations.json (${e.code ?? e.message}).`);
     console.error('Run `npm run locations` first (needs GOOGLE_METADATA_API_KEY in .env).');
