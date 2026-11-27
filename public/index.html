@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Where is this?</title>
+  <meta name="description" content="Street View drops you somewhere. Pin where you think it is.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&display=swap">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body data-view="loading" data-movement="move">
+  <div id="pano" aria-label="Street View"></div>
+  <div id="lock"></div>
+
+  <a class="home" href="https://margauxfaurie.com">margauxfaurie.com</a>
+
+  <div id="hud">
+    <span class="pill" id="hud-round"></span>
+    <span class="pill" id="hud-score"></span>
+    <span class="pill" id="hud-timer" hidden></span>
+  </div>
+
+  <div id="guess">
+    <div id="guess-map"></div>
+    <button type="button" class="btn" id="guess-btn" disabled>Place your pin</button>
+  </div>
+
+  <section id="result" aria-live="polite">
+    <p class="small" id="result-round"></p>
+    <h2 class="project" id="result-title"></h2>
+    <p class="lead" id="result-score"></p>
+    <div class="meter" aria-hidden="true"><i id="result-meter"></i></div>
+    <div class="row">
+      <span class="pill" id="result-total"></span>
+      <button type="button" class="btn" id="next">Next round</button>
+    </div>
+  </section>
+
+  <section id="setup" class="screen">
+    <div class="panel">
+      <h1 class="display">Where is this?</h1>
+      <p class="lead">Street View drops you somewhere. Pin where you think it is. Five rounds, and closer scores more.</p>
+      <form id="setup-form">
+        <div class="fields">
+          <label class="field">Movement
+            <select name="movement">
+              <option value="move">Move around</option>
+              <option value="nomove">No moving</option>
+              <option value="nmpz">No moving, panning or zooming</option>
+            </select>
+          </label>
+          <label class="field">Time per round
+            <select name="time">
+              <option value="0">No limit</option>
+              <option value="30">30 seconds</option>
+              <option value="60">1 minute</option>
+              <option value="120">2 minutes</option>
+              <option value="180">3 minutes</option>
+            </select>
+          </label>
+        </div>
+        <button type="submit" class="btn ink">Start</button>
+      </form>
+    </div>
+  </section>
+
+  <section id="summary" class="screen">
+    <div class="panel">
+      <p class="small">Game over</p>
+      <h1 class="display" id="summary-total"></h1>
+      <p class="lead" id="summary-max"></p>
+      <ol class="route" id="summary-rounds"></ol>
+      <button type="button" class="btn ink" id="again">Play again</button>
+    </div>
+  </section>
+
+  <div id="loading" role="status" aria-label="Loading"><span class="dots"><i></i><i></i><i></i></span></div>
+  <p id="notice" role="status" hidden></p>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+node_modules/
+.env
+# True coordinates must never be public: keep generated data out of git
+data/locations.json
+data/games.json
+data/*.tmp
