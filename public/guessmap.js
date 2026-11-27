@@ -83,15 +83,18 @@ export function createGuessMap(container, { onPick, onError, interactive = true,
   let markers = [];
   let pinMarker = null;
   const ready = new Promise((resolve) => map.once('load', resolve));
-  // Tiles or style unreachable: say so once instead of showing a blank map.
+  // Style unreachable (OpenFreeMap down or blocked): say so once instead of showing a blank map.
+  // A single missing tile later on is normal and not reported.
+  let loaded = false;
+  ready.then(() => { loaded = true; });
   let failed = false;
   const fail = () => {
-    if (failed) return;
+    if (failed || loaded) return;
     failed = true;
     onError?.('The map could not load. Check your connection and reload.');
   };
-  map.on('error', (e) => { if (!map.loaded() && /style|source|tile|fetch/i.test(String(e?.error?.message ?? ''))) fail(); });
-  setTimeout(() => { if (!map.loaded() && !map.isStyleLoaded()) fail(); }, 15_000);
+  map.on('error', (e) => { if (!map.isStyleLoaded()) { console.warn('[guessgeo] map', e?.error?.message); fail(); } });
+  setTimeout(fail, 20_000);
 
   ready.then(() => {
     map.addSource('route', { type: 'geojson', data: lineFeatures([]) });
