@@ -62,7 +62,7 @@ async function api(path, init = {}) {
   const body = await res.json().catch(() => ({}));
   // 410 means time ran out: the body still carries the round's result, so it is not an error here.
   if (!res.ok && res.status !== 410) {
-    throw Object.assign(new Error(body.message || 'Something went wrong. Try again.'), { status: res.status });
+    throw Object.assign(new Error(body.message || 'Something went wrong. Try again.'), { status: res.status, code: body.error });
   }
   return { status: res.status, body };
 }
@@ -235,6 +235,8 @@ async function replaceDeadRound(round) {
     startRound(body);
   } catch (e) {
     notice(e.message, 'pano');
+    // In a challenge the place cannot be swapped: the round is skipped (0 points) for this player.
+    if (e.code === 'challenge_no_replace') return submit();
     if (e.status === 409) return resync();
     startTimer(round);
   }
@@ -358,7 +360,10 @@ const savedName = () => { try { return localStorage.getItem(NAME_KEY) ?? ''; } c
 const saveName = (n) => { try { localStorage.setItem(NAME_KEY, n); } catch { /* storage can be blocked */ } };
 const challengeUrl = (id) => `${location.origin}/?c=${id}`;
 
+const canShare = () => Boolean(navigator.share) && matchMedia('(hover: none)').matches;
+
 function showShare(challengeId) {
+  $('#share-btn').textContent = canShare() ? 'Share link' : 'Copy link';
   $('#challenge-form').hidden = true;
   $('#share').hidden = false;
   $('#share-link').value = challengeUrl(challengeId);
@@ -369,14 +374,17 @@ async function renderChallenge() {
   $('#share').hidden = true;
   $('#challenge-form').hidden = Boolean(state.game.challengeId);
   $('#challenge-form').player.value = savedName();
-  if (!state.game.challengeId) return;
-  showShare(state.game.challengeId);
+  const game = state.game;
+  if (!game.challengeId) return;
+  showShare(game.challengeId);
   try {
-    const { body } = await api(`/api/challenges/${state.game.challengeId}`);
-    if (!body.board) return;
+    const { body } = await api(`/api/challenges/${game.challengeId}`);
+    if (!body.board || state.game !== game || document.body.dataset.view !== 'summary') return;
     $('#board').replaceChildren(
       ...body.board.map((p) => {
         const li = document.createElement('li');
+        li.classList.toggle('me', p.me);
+        li.dataset.rank = p.rank;
         const who = document.createElement('span');
         who.className = 'who';
         who.textContent = p.name;
@@ -395,10 +403,12 @@ async function renderChallenge() {
 $('#challenge-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const name = e.currentTarget.player.value.trim();
+  const game = state.game; // the player may start another game while this request runs
   try {
-    const { body } = await api(`/api/games/${state.game.id}/challenge`, { method: 'POST', body: JSON.stringify({ name }) });
+    const { body } = await api(`/api/games/${game.id}/challenge`, { method: 'POST', body: JSON.stringify({ name }) });
     saveName(name);
-    state.game.challengeId = body.challenge_id;
+    game.challengeId = body.challenge_id;
+    if (state.game !== game || document.body.dataset.view !== 'summary') return;
     showShare(body.challenge_id);
     $('#share-btn').focus();
   } catch (err) {
@@ -409,7 +419,7 @@ $('#challenge-form').addEventListener('submit', async (e) => {
 $('#share-btn').addEventListener('click', async () => {
   const url = $('#share-link').value;
   try {
-    if (navigator.share && matchMedia('(hover: none)').matches) {
+    if (canShare()) {
       await navigator.share({ title: 'Where is this?', text: 'Beat my score on these five places', url });
       return;
     }
@@ -516,7 +526,7 @@ async function boot() {
         return await openChallenge(challengeId.toLowerCase());
       } catch (e) {
         notice(e.status === 404 ? 'That challenge link does not exist.' : e.message);
-        history.replaceState(null, '', '/');
+        if (e.status === 404) history.replaceState(null, '', '/');
       }
     }
     const lastId = remembered();
@@ -551,8 +561,14 @@ $('#setup-form').addEventListener('submit', async (e) => {
     let body;
     if (state.joining) {
       const name = form.player.value.trim();
-      ({ body } = await api(`/api/challenges/${state.joining}/join`, { method: 'POST', body: JSON.stringify({ name }) }));
+      try {
+        ({ body } = await api(`/api/challenges/${state.joining}/join`, { method: 'POST', body: JSON.stringify({ name }) }));
+      } catch (err) {
+        if (err.code === 'challenge_full') leaveChallengeInvite(); // still free to play a normal game
+        throw err;
+      }
       saveName(name);
+      state.joining = null;
     } else {
       ({ body } = await api('/api/games', {
         method: 'POST',

@@ -15,6 +15,14 @@ function nextVersion(games, game) {
   if (game.version !== expected) {
     throw new HttpError(409, 'conflict', 'This game changed while you were playing. Reload and try again.');
   }
+  if (!current && game.challenge_id) {
+    // Same rule as the unique index on D1: one game per player per challenge.
+    for (const g of games.values()) {
+      if (g.challenge_id === game.challenge_id && g.user_id === game.user_id) {
+        throw new HttpError(409, 'conflict', 'You already have a game in this challenge. Reload to continue it.');
+      }
+    }
+  }
   const next = structuredClone(game);
   next.version = expected + 1;
   return next;

@@ -38,7 +38,7 @@ export function createD1Store(db, now = Date.now) {
 
     async listByChallenge(challengeId) {
       const { results } = await db
-        .prepare('SELECT data FROM games WHERE challenge_id = ?1 ORDER BY created_at LIMIT 200')
+        .prepare('SELECT data FROM games WHERE challenge_id = ?1 ORDER BY created_at, rowid LIMIT 200')
         .bind(challengeId)
         .all();
       return results.map((r) => JSON.parse(r.data));

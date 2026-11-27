@@ -32,8 +32,11 @@ export const MAX_CHALLENGE_PLAYERS = 50;
 /** A display name for a challenge: 1 to 20 printable characters, trimmed. */
 export function parseName(raw) {
   const name = typeof raw === 'string' ? raw.normalize('NFC').trim().replace(/\s+/g, ' ') : '';
-  // No control or invisible formatting characters; length counted in user-perceived characters.
-  if (!name || /[\p{Cc}\p{Cf}]/u.test(name) || [...name].length > 20) {
+  // No control, surrogate or invisible formatting characters (joiners allowed, for emoji and Persian),
+  // at least one letter or digit, and not a pile of combining marks. Length in code points.
+  const invisible = /[\p{Cc}\p{Cs}\u3164\u2800\u115F\u1160\uFFA0]|(?![\u200C\u200D])\p{Cf}/u;
+  const marks = (name.match(/\p{M}/gu) ?? []).length;
+  if (!name || invisible.test(name) || !/[\p{L}\p{N}]/u.test(name) || marks > 6 || [...name].length > 20) {
     throw new HttpError(400, 'bad_name', 'Pick a name of 1 to 20 characters.');
   }
   return name;
@@ -179,15 +182,19 @@ export function createGameService({
   }
 
   // The scoreboard: finished games only, best first. Never coordinates of rounds a viewer has not played.
-  function board(games) {
-    return games
+  function board(games, userId) {
+    const rows = games
       .filter((g) => g.status === 'finished')
       .map((g) => ({
         name: g.player_name,
+        me: g.user_id === userId,
         total_score: g.total_score,
         rounds: g.rounds.map((r) => ({ score: r.score, distance_km: r.distance_km })),
       }))
       .sort((a, b) => b.total_score - a.total_score);
+    // Equal totals share a place (1, 2, 2, 4).
+    rows.forEach((r, i) => { r.rank = i > 0 && rows[i - 1].total_score === r.total_score ? rows[i - 1].rank : i + 1; });
+    return rows;
   }
 
   async function challengeGames(challengeId) {
@@ -268,10 +275,11 @@ export function createGameService({
       const games = await challengeGames(challengeId);
       const mine = games.find((g) => g.user_id === userId);
       if (mine) return view(mine);
-      if (games.length >= MAX_CHALLENGE_PLAYERS) {
+      if (games.filter((g) => g.status === 'finished').length >= MAX_CHALLENGE_PLAYERS) {
         throw new HttpError(409, 'challenge_full', 'This challenge is full.');
       }
-      const game = copyGame(games[0], userId, { challenge_id: challengeId, player_name: parseName(rawName) });
+      const source = games.find((g) => g.mode !== 'challenge') ?? games[0];
+      const game = copyGame(source, userId, { challenge_id: challengeId, player_name: parseName(rawName) });
       await store.put(game);
       return view(game);
     },
@@ -279,7 +287,7 @@ export function createGameService({
     /** What a challenge looks like to this player: the scoreboard once they have finished, a summary before. */
     async getChallenge(userId, challengeId) {
       const games = await challengeGames(challengeId);
-      const source = games[0];
+      const source = games.find((g) => g.mode !== 'challenge') ?? games[0];
       const mine = games.find((g) => g.user_id === userId);
       const done = mine?.status === 'finished';
       return {
@@ -290,7 +298,7 @@ export function createGameService({
         players: games.filter((g) => g.status === 'finished').length,
         my_game_id: mine?.id ?? null,
         my_status: mine?.status ?? null,
-        board: done ? board(games) : null,
+        board: done ? board(games, userId) : null,
       };
     },
 
@@ -331,6 +339,10 @@ export function createGameService({
       }
       if (cur.deadline_at !== null && now() > cur.deadline_at) {
         throw new HttpError(409, 'deadline_passed', 'Time already ran out for that round.');
+      }
+      if (game.mode === 'challenge') {
+        // Everyone in a challenge must play the same places: no swaps, the round is skipped instead.
+        throw new HttpError(409, 'challenge_no_replace', 'This spot is gone from Street View. Skip this round.');
       }
       if (typeof failedPanoId !== 'string' || failedPanoId !== cur.pano_id) {
         // Already replaced (a retry) or a made-up id: answer with the round as it is.

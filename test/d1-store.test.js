@@ -68,7 +68,9 @@ test('d1 store: games are listed by challenge, oldest first, and keep their chal
   const store = createD1Store(fakeD1(), () => t++);
   await store.put(game({ id: 'a', challenge_id: 'c1' }));
   await store.put(game({ id: 'b' }));
-  await store.put(game({ id: 'c', challenge_id: 'c1' }));
+  await store.put(game({ id: 'c', user_id: 'u2', challenge_id: 'c1' }));
+  // One game per player per challenge.
+  await assert.rejects(store.put(game({ id: 'd', challenge_id: 'c1' })), { status: 409 });
   const a = await store.get('a');
   await store.put({ ...a, rounds: [9] });
   assert.deepEqual((await store.listByChallenge('c1')).map((g) => g.id), ['a', 'c']);

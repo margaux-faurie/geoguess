@@ -132,12 +132,12 @@ export function createApp({
       return { body: await service.getChallenge(userId, m[1].toLowerCase()) };
     }
     if ((m = JOIN_PATH.exec(pathname)) && method === 'POST') {
+      const body = await readJsonObject(request);
       const t = now();
       // Joining creates a game: same limits as starting one.
       if (!gamesPerIp.allow(clientIp(request), t) || !gamesPerUser.allow(userId, t)) {
         throw new HttpError(429, 'rate_limited', 'Too many new games. Try again later.');
       }
-      const body = await readJsonObject(request);
       return { status: 201, body: await service.joinChallenge(userId, m[1].toLowerCase(), body.name) };
     }
     if ((m = GAME_PATH.exec(pathname)) && method === 'GET') {
