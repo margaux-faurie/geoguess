@@ -137,3 +137,16 @@ test('static files: served, no directory traversal', async () => {
     assert.notEqual(raw.headers.get('content-type'), 'application/json; charset=utf-8');
   });
 });
+
+test('a dead panorama can be replaced over HTTP', async () => {
+  await withServer(async ({ call }) => {
+    const g = (await call('/api/games', { method: 'POST', body: '{}' })).body;
+    const r1 = (await call(`/api/games/${g.game_id}/rounds/1/start`, { method: 'POST', body: '{}' })).body;
+    const r2 = await call(`/api/games/${g.game_id}/rounds/1/replace`, { method: 'POST', body: JSON.stringify({ failed_pano_id: r1.pano_id }) });
+    assert.equal(r2.status, 200);
+    assert.notEqual(r2.body.pano_id, r1.pano_id);
+    const again = await call(`/api/games/${g.game_id}/rounds/1/replace`, { method: 'POST', body: JSON.stringify({ failed_pano_id: r2.body.pano_id }) });
+    assert.equal(again.status, 409);
+    assert.equal(again.body.error, 'already_replaced');
+  });
+});

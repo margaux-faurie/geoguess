@@ -9,6 +9,7 @@ const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const UUID_RE = new RegExp(`^${UUID}$`, 'i');
 const GAME_PATH = new RegExp(`^/api/games/(${UUID})$`, 'i');
 const START_PATH = new RegExp(`^/api/games/(${UUID})/rounds/(\\d{1,2})/start$`, 'i');
+const REPLACE_PATH = new RegExp(`^/api/games/(${UUID})/rounds/(\\d{1,2})/replace$`, 'i');
 const GUESS_PATH = new RegExp(`^/api/games/(${UUID})/rounds/(\\d{1,2})/guess$`, 'i');
 
 /**
@@ -126,6 +127,10 @@ export function createApp({
     if ((m = START_PATH.exec(pathname)) && method === 'POST') {
       await readJsonObject(request);
       return { body: await service.startRound(userId, m[1].toLowerCase(), Number(m[2])) };
+    }
+    if ((m = REPLACE_PATH.exec(pathname)) && method === 'POST') {
+      const body = await readJsonObject(request);
+      return { body: await service.replaceRound(userId, m[1].toLowerCase(), Number(m[2]), body.failed_pano_id) };
     }
     if ((m = GUESS_PATH.exec(pathname)) && method === 'POST') {
       if (!guessLimit.allow(`${userId}:${m[1].toLowerCase()}`, now())) {

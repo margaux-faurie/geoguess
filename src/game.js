@@ -198,6 +198,44 @@ export function createGameService({
     },
 
     /**
+     * Swap the current round's panorama for another, once, when the player's browser could not load it
+     * (Google removed it since the location list was built). The caller names the panorama it failed on,
+     * so a stale or repeated request changes nothing. The new panorama gets a fresh clock. The old
+     * location is never revealed, and each round can be replaced only once, so this cannot be used to
+     * shop for an easier round more than one time per round.
+     */
+    async replaceRound(userId, id, roundNo, failedPanoId) {
+      const game = await ownedGame(userId, id);
+      if (game.status !== 'in_progress') {
+        throw new HttpError(409, 'game_finished', 'This game is finished.');
+      }
+      const cur = currentRound(game);
+      assertCurrent(cur, roundNo);
+      if (cur.started_at === null) {
+        throw new HttpError(409, 'round_not_started', 'Start the round before replacing it.');
+      }
+      if (typeof failedPanoId !== 'string' || failedPanoId !== cur.pano_id) {
+        // Already replaced (a retry) or a made-up id: answer with the round as it is.
+        return { ...publicRound(cur), server_now: now() };
+      }
+      if (cur.replaced) {
+        throw new HttpError(409, 'already_replaced', 'This round was already replaced once.');
+      }
+      const map = mapsById.get(game.map_id);
+      const used = new Set(game.rounds.map((r) => r.pano_id).concat(game.dead_panos ?? []));
+      const spare = (map?.locations ?? []).filter((l) => !used.has(l.pano_id));
+      if (spare.length === 0) {
+        throw new HttpError(409, 'no_spare_location', 'No other location is available for this round.');
+      }
+      const [loc] = sample(spare, 1);
+      game.dead_panos = [...(game.dead_panos ?? []), cur.pano_id];
+      Object.assign(cur, { pano_id: loc.pano_id, heading: loc.heading ?? 0, true_lat: loc.lat, true_lng: loc.lng, replaced: true });
+      beginRound(cur);
+      await store.put(game);
+      return { ...publicRound(cur), server_now: now() };
+    },
+
+    /**
      * Resolve the current round. `guess` null = skip (0 points).
      * A guess after the deadline is stored as 0 and answered with 410 carrying the result.
      */

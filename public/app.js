@@ -203,6 +203,8 @@ function loadPanorama(round) {
     if (state.round?.round_no !== roundNo) return;
     if (status !== google.maps.StreetViewStatus.OK) console.warn('[guessgeo] street view lookup', status);
     if (status !== google.maps.StreetViewStatus.OK || !data?.location?.pano) {
+      // Gone from Street View (ZERO_RESULTS): ask the server for another place, once, at no cost.
+      if (status === google.maps.StreetViewStatus.ZERO_RESULTS) return replaceDeadRound(round);
       notice(`Street View could not load this spot (${status}).`, 'pano');
       return;
     }
@@ -216,6 +218,21 @@ function loadPanorama(round) {
     panorama.setVisible(true);
     google.maps.event.trigger(panorama, 'resize');
   });
+}
+
+async function replaceDeadRound(round) {
+  notice('That spot is gone from Street View. Finding another one…', 'pano');
+  try {
+    const { body } = await api(`/api/games/${state.game.id}/rounds/${round.round_no}/replace`, {
+      method: 'POST',
+      body: JSON.stringify({ failed_pano_id: round.pano_id }),
+    });
+    state.clockOffset = body.server_now - Date.now();
+    if (body.pano_id === round.pano_id) throw new Error('No other spot is available. Skip this round.');
+    startRound(body);
+  } catch (e) {
+    notice(e.message, 'pano');
+  }
 }
 
 function panoOptionsFor(mode) {

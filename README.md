@@ -23,6 +23,7 @@ Milestone 1 of the spec: one World map, Classic mode, guest play, server-side sc
 - Score per round: `5000 * e^(-10 d / D)` with `d` the miss in km and `D` the map's scale (14,917 km for the World map). A guess within 25 m is a perfect 5,000. Distance is haversine. Both live in `src/scoring.js`, the only place scores are computed.
 - Timer: the clock of a round starts when the player's browser asks for it (`POST /api/games/:id/rounds/:n/start`), so reading a result never costs time, and the panorama id is not revealed before that. The server accepts a guess up to 2 seconds after the limit. Later than that scores 0 (HTTP 410, the answer is still revealed). One guess per round, in order. Only an explicit `{"guess": null}` skips a round.
 - Players are guests: a random id in an httpOnly cookie. A game belongs to its id, so nobody can read another player's game.
+- A dead panorama (Street View answers ZERO_RESULTS) is swapped once per round for an unused location. The client must name the panorama it failed on; the old place is never revealed.
 - Limits: 30 new games an hour per player and 90 per client address, one guess a second per game. POSTs must be same-origin `application/json` bodies of at most 10,000 bytes.
 - Games keep the map's scale from when they started. Pages carry security headers (`src/security-headers.js`, mirrored in `public/_headers`); the CSP is report-only until the browser console shows no violations with the live Maps scripts, then rename it to `Content-Security-Policy`.
 - The dev server listens on 127.0.0.1 only (`HOST=0.0.0.0` to share it on your network).
@@ -55,7 +56,7 @@ Terms: the billing account is in France, so the Google Maps Platform EEA terms a
 
 A full five-round game on the local server: panorama display, compass, Back to start, pin and Guess (click and Space), result view with the great-circle line, Next (click and Enter), resume after reload, game-over map.
 
-Not tested yet: the No moving and No moving/panning/zooming modes, the timer running out, phone screens, and the Worker on Cloudflare. Billing: watch the first day's usage in Google Cloud. A panorama removed since `npm run locations` shows "Street View is not available at this spot"; there is no free skip yet.
+Not tested yet: the No moving and No moving/panning/zooming modes, the timer running out, phone screens, and the Worker on Cloudflare. Billing: watch the first day's usage in Google Cloud. A panorama removed from Street View since `npm run locations` is replaced for free, once per round, with a fresh clock (`POST /api/games/:id/rounds/:n/replace`, tested on the server only: the browser path needs a real dead panorama).
 
 ## Known limits
 
