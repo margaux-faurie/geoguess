@@ -5,11 +5,11 @@
 
 export const CSP = [
   "default-src 'self'",
-  "script-src 'self' https://maps.googleapis.com",
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "script-src 'self' https://maps.googleapis.com https://cdn.jsdelivr.net",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net",
   "font-src https://fonts.gstatic.com",
   "img-src 'self' data: blob: https://maps.googleapis.com https://streetviewpixels-pa.googleapis.com https://maps.gstatic.com https://*.googleusercontent.com https://*.ggpht.com",
-  "connect-src 'self' https://maps.googleapis.com",
+  "connect-src 'self' https://maps.googleapis.com https://tiles.openfreemap.org",
   'worker-src blob:',
   "frame-ancestors 'none'",
   "base-uri 'none'",

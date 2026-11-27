@@ -9,7 +9,12 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,200..800&display=swap">
+  <!-- MapLibre for the guess map: pinned version, integrity-checked. -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.1/dist/maplibre-gl.css"
+        integrity="sha384-uTttxo/aOKbdE5RlD/SPzSDoDmNvGlUYPjONi2MN/b7c9HPSvW07OIuyP7uL6jxK" crossorigin="anonymous">
   <link rel="stylesheet" href="/style.css">
+  <script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.1/dist/maplibre-gl.js"
+          integrity="sha384-nXMl9YiLoSG5KBPTFgvxVuIqQQcqIvo0bFrvoEaGJC6r7IibIzF1S36Zbf/sKBtL" crossorigin="anonymous" defer></script>
 </head>
 <body data-view="loading" data-movement="move">
   <div id="pano-frame"><div id="pano" aria-label="Street View"></div></div>
@@ -23,9 +28,15 @@
     <span class="pill" id="hud-timer" hidden></span>
   </div>
 
+  <div id="tools">
+    <div id="compass" class="compass" role="img" aria-label="Compass"><span id="compass-needle" class="needle"></span><b>N</b></div>
+    <button type="button" class="pill tool" id="back-to-start" hidden>Back to start</button>
+  </div>
+
   <div id="guess">
     <div id="guess-map"></div>
     <button type="button" class="btn" id="guess-btn" disabled>Place your pin</button>
+    <p class="hint">Space to guess</p>
   </div>
 
   <section id="result" aria-live="polite">
@@ -72,6 +83,7 @@
       <p class="small">Game over</p>
       <h1 class="display" id="summary-total"></h1>
       <p class="lead" id="summary-max"></p>
+      <div id="summary-map" class="summary-map" aria-label="Map of every round"></div>
       <ol class="route" id="summary-rounds"></ol>
       <button type="button" class="btn ink" id="again">Play again</button>
     </div>

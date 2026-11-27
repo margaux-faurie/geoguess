@@ -1,4 +1,7 @@
-// guessgeo client. No build step, no dependencies.
+import { createGuessMap } from './guessmap.js';
+
+// guessgeo client. No build step. Street View comes from the Maps JavaScript API; the guess map is
+// MapLibre with OpenStreetMap tiles (see guessmap.js).
 // The server owns the locations and the scores: this file only shows a panorama by id,
 // sends a pin, and displays what comes back.
 
@@ -6,26 +9,6 @@ const $ = (sel) => document.querySelector(sel);
 const fmt = (n) => Number(n).toLocaleString('en');
 const MAX_ROUND_SCORE = 5000;
 const STORAGE_KEY = 'guessgeo:game';
-
-// Design system colours (tokens.json), as the Maps API needs them in JS.
-const INK = '#0c0b0a';
-const ORANGE = '#ffb38a';
-const NAVY = '#14284b';
-const PAPER = '#fbf9f5';
-
-// Guess map in the paper palette: quiet land and water, roads as hairlines, no points of interest.
-const MAP_STYLE = [
-  { elementType: 'geometry', stylers: [{ color: '#fbf9f5' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#544e44' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#fbf9f5' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#e3ddd1' }] },
-  { featureType: 'landscape', elementType: 'geometry', stylers: [{ color: '#f2eee6' }] },
-  { featureType: 'administrative', elementType: 'geometry.stroke', stylers: [{ color: '#8f8777' }, { weight: 0.6 }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#e3ddd1' }] },
-  { featureType: 'road', elementType: 'labels', stylers: [{ visibility: 'off' }] },
-  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
-  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
-];
 
 const state = {
   game: null, // { id, settings, total, roundsTotal }
@@ -38,9 +21,8 @@ const state = {
 };
 let panorama;
 let guessMap;
-let pinMarker;
-let answerMarker;
-let routeLine;
+let summaryMap;
+let startPano = null; // where the round began, for "Back to start"
 let noticeKey = '';
 
 function setView(view) {
@@ -98,7 +80,7 @@ function loadGoogle(key) {
       $('#setup-form button').disabled = true; // a game on a blank panorama would only waste quota
     };
     const s = document.createElement('script');
-    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&v=quarterly&callback=__mapsReady`;
+    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&v=quarterly&loading=async&callback=__mapsReady`;
     s.async = true;
     s.onerror = () => reject(new Error('Could not load Google Maps.'));
     document.head.append(s);
@@ -106,21 +88,7 @@ function loadGoogle(key) {
 }
 
 function initMaps() {
-  guessMap = new google.maps.Map($('#guess-map'), {
-    center: { lat: 20, lng: 0 },
-    zoom: 1,
-    minZoom: 1,
-    disableDefaultUI: true,
-    zoomControl: true,
-    clickableIcons: false,
-    gestureHandling: 'greedy',
-    draggableCursor: 'crosshair',
-    styles: MAP_STYLE,
-  });
-  guessMap.addListener('click', (e) => {
-    if (document.body.dataset.view === 'play' && !state.busy) placePin(e.latLng);
-  });
-  $('#guess').addEventListener('transitionend', () => google.maps.event.trigger(guessMap, 'resize'));
+  guessMap = createGuessMap($('#guess-map'), { onPick: placePin });
 
   // Keep the keyboard from moving the player when movement is off.
   $('#pano').addEventListener('keydown', (e) => {
@@ -128,22 +96,20 @@ function initMaps() {
     const moves = ['ArrowUp', 'ArrowDown', 'w', 'W', 's', 'S'];
     if (mode === 'nmpz' || (mode === 'nomove' && moves.includes(e.key))) e.stopPropagation();
   }, true);
-}
 
-const pinIcon = () => ({ path: google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: ORANGE, fillOpacity: 1, strokeColor: INK, strokeWeight: 2 });
-const answerIcon = () => ({ path: google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: NAVY, fillOpacity: 1, strokeColor: PAPER, strokeWeight: 2 });
+  $('#back-to-start').addEventListener('click', () => {
+    if (!panorama || !startPano) return;
+    panorama.setPano(startPano.pano);
+    panorama.setPov({ heading: startPano.heading, pitch: 0 });
+    panorama.setZoom(1);
+  });
+}
 
 function placePin(latLng) {
-  state.pin = { lat: latLng.lat(), lng: latLng.lng() };
-  if (!pinMarker) pinMarker = new google.maps.Marker({ map: guessMap, icon: pinIcon() });
-  pinMarker.setPosition(latLng);
+  if (document.body.dataset.view !== 'play' || state.busy) return;
+  state.pin = latLng;
   $('#guess-btn').disabled = false;
   $('#guess-btn').textContent = 'Guess';
-}
-
-function clearOverlays() {
-  for (const o of [pinMarker, answerMarker, routeLine]) o?.setMap(null);
-  pinMarker = answerMarker = routeLine = null;
 }
 
 function renderHud() {
@@ -179,20 +145,19 @@ function startRound(round) {
   state.round = round;
   state.pin = null;
   state.busy = false;
-  clearOverlays();
   clearNotice('pano');
 
   const mode = state.game.settings.movement;
   document.body.dataset.movement = mode;
-  guessMap.setCenter({ lat: 20, lng: 0 });
-  guessMap.setZoom(1);
   $('#guess-btn').disabled = true;
   $('#guess-btn').textContent = 'Place your pin';
 
   renderHud();
   // Show the view first so the panorama is laid out before it loads.
   setView('play');
-  google.maps.event.trigger(guessMap, 'resize');
+  guessMap.reset();
+  startPano = null;
+  $('#back-to-start').hidden = mode !== 'move';
   loadPanorama(round);
   startTimer(round);
 }
@@ -220,6 +185,9 @@ function ensurePanorama(panoId, heading) {
     if (status && status !== 'OK') notice('Street View is not available at this spot.', 'pano');
     else clearNotice('pano');
   });
+  panorama.addListener('pov_changed', () => {
+    $('#compass-needle').style.transform = `rotate(${-panorama.getPov().heading}deg)`;
+  });
 }
 
 // Ask Street View for the panorama first, so a failure says why instead of showing a blank page.
@@ -235,6 +203,7 @@ function loadPanorama(round) {
       return;
     }
     const heading = round.heading;
+    startPano = { pano: data.location.pano, heading };
     ensurePanorama(data.location.pano, heading);
     panorama.setOptions(panoOptionsFor(state.game.settings.movement));
     panorama.setPano(data.location.pano);
@@ -307,25 +276,6 @@ async function resync() {
 
 function showResult(res) {
   setView('result');
-  answerMarker = new google.maps.Marker({ map: guessMap, position: res.true, icon: answerIcon() });
-  const bounds = new google.maps.LatLngBounds();
-  bounds.extend(res.true);
-  if (res.guess) {
-    routeLine = new google.maps.Polyline({
-      map: guessMap, path: [res.guess, res.true], geodesic: true, strokeColor: INK, strokeOpacity: 0.7, strokeWeight: 2,
-    });
-    bounds.extend(res.guess);
-  }
-  requestAnimationFrame(() => {
-    google.maps.event.trigger(guessMap, 'resize');
-    if (res.guess) {
-      guessMap.fitBounds(bounds, 140);
-    } else {
-      guessMap.setCenter(res.true);
-      guessMap.setZoom(6);
-    }
-  });
-
   $('#result-round').textContent = `Round ${res.round_no} of ${state.game.roundsTotal}`;
   $('#result-title').textContent = res.distance_km === null ? 'No guess' : `${formatKm(res.distance_km)} away`;
   $('#result-score').textContent = `${fmt(res.score)} points`;
@@ -333,6 +283,11 @@ function showResult(res) {
   const meter = $('#result-meter');
   meter.style.width = '0%';
   requestAnimationFrame(() => { meter.style.width = `${(res.score / MAX_ROUND_SCORE) * 100}%`; });
+
+  renderHud();
+  // Frame the guess and the place in the part of the screen the result card leaves free.
+  const card = $('#result').getBoundingClientRect();
+  guessMap.showAnswer(res.guess, res.true, { top: 72, left: 48, right: 48, bottom: Math.round(window.innerHeight - card.top) + 32 });
 
   $('#next').textContent = res.finished ? 'See results' : 'Next round';
   $('#next').onclick = () => {
@@ -345,9 +300,10 @@ function showResult(res) {
 
 function showSummary() {
   stopTimer();
-  clearOverlays();
   remember(null);
   setView('summary');
+  if (!summaryMap) summaryMap = createGuessMap($('#summary-map'), { interactive: true });
+  summaryMap.showAll(state.results);
   $('#summary-total').textContent = `${fmt(state.game.total)} points`;
   $('#summary-max').textContent = `Out of ${fmt(state.game.roundsTotal * MAX_ROUND_SCORE)}.`;
   $('#summary-rounds').replaceChildren(
@@ -405,6 +361,8 @@ async function boot() {
       return;
     }
     await loadGoogle(cfg.maps_key);
+    await google.maps.importLibrary('streetView');
+    if (!window.maplibregl) throw new Error('Could not load the map. Check your connection and reload.');
     initMaps();
     const lastId = remembered();
     if (lastId) {
@@ -441,6 +399,20 @@ $('#setup-form').addEventListener('submit', async (e) => {
   }
 });
 $('#guess-btn').addEventListener('click', submit);
+
+// Space or Enter: guess once a pin is down, or go on from a result. Ignored while typing in a field.
+document.addEventListener('keydown', (e) => {
+  if (e.repeat || e.altKey || e.ctrlKey || e.metaKey || !(e.key === ' ' || e.key === 'Enter')) return;
+  if (e.target.closest?.('select, input, textarea, button, a')) return;
+  const view = document.body.dataset.view;
+  if (view === 'play' && state.pin && !state.busy) {
+    e.preventDefault();
+    submit();
+  } else if (view === 'result') {
+    e.preventDefault();
+    $('#next').click();
+  }
+});
 $('#again').addEventListener('click', () => setView('setup'));
 
 boot();
