@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { createApp } from '../src/app.js';
+import { createLimiter } from '../src/limiter.js';
 import { SECURITY_HEADERS } from '../src/security-headers.js';
 import { createNodeServer } from '../src/server.js';
 import { fixtureService } from './fixtures.js';
@@ -66,7 +67,7 @@ test('game creation is limited per client address, not only per cookie', async (
   const create = (n) =>
     handle(new Request(`${ORIGIN}/api/games`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'cf-connecting-ip': '203.0.113.9', cookie: `__Host-gid=00000000-0000-4000-8000-${String(n).padStart(12, '0')}` },
+      headers: { 'content-type': 'application/json', 'x-client-ip': '203.0.113.9', cookie: `__Host-gid=00000000-0000-4000-8000-${String(n).padStart(12, '0')}` },
       body: '{}',
     }));
   const statuses = [];
@@ -83,18 +84,24 @@ test('over https the cookie is __Host-prefixed and Secure; over http it is plain
   assert.ok(!/Secure/.test(http1.headers.get('set-cookie')));
 });
 
-test('limiter state stays bounded: stale keys are swept', async () => {
-  const { handle, clock } = setup({ gamesPerHour: 1000, gamesPerHourPerIp: 1000 });
-  for (let n = 0; n < 50; n++) {
-    await handle(new Request(`${ORIGIN}/api/games`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', cookie: `__Host-gid=00000000-0000-4000-8000-${String(n).padStart(12, '0')}` },
-      body: '{}',
-    }));
-  }
-  clock.t += 3_700_000;
-  const res = await handle(new Request(`${ORIGIN}/api/games`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }));
-  assert.equal(res.status, 201); // still working after the sweep
+test('limiter: counts per key, resets with time, and drops stale keys', () => {
+  const limiter = createLimiter({ windowMs: 1000, max: 2 });
+  assert.equal(limiter.allow('a', 0), true);
+  assert.equal(limiter.allow('a', 1), true);
+  assert.equal(limiter.allow('a', 2), false);
+  assert.equal(limiter.allow('b', 3), true, 'other keys are independent');
+  assert.equal(limiter.allow('a', 1002), true, 'the window slides');
+
+  for (let i = 0; i < 100; i++) limiter.allow(`k${i}`, 10);
+  assert.ok(limiter.size() > 100);
+  limiter.allow('later', 5000); // past every window: the sweep runs
+  assert.equal(limiter.size(), 1, 'stale keys are gone');
+});
+
+test('limiter: a refused key never creates state of its own', () => {
+  const limiter = createLimiter({ windowMs: 1000, max: 0 });
+  assert.equal(limiter.allow('x', 0), false);
+  assert.equal(limiter.size(), 0);
 });
 
 async function withNode(fn) {
@@ -136,14 +143,34 @@ test('node server: security headers everywhere, 400 for malformed paths, 405 for
   });
 });
 
-test('node server: a client-sent x-client-ip is ignored (the socket address is used)', async () => {
-  await withNode(async (base) => {
+test('node server: spoofed client-address headers do not escape the per-address limit', async () => {
+  const { service, clock } = fixtureService();
+  const handle = createApp({ service, now: () => clock.t, limits: { gamesPerHourPerIp: 2 } });
+  const publicDir = mkdtempSync(join(tmpdir(), 'guessgeo-public-'));
+  const server = createNodeServer({ handle, publicDir });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
     const statuses = [];
-    // Same socket, different spoofed headers: all count against one address (limit is 90, so just check it works).
-    for (const ip of ['1.1.1.1', '2.2.2.2']) {
-      statuses.push((await fetch(`${base}/api/maps`, { headers: { 'x-client-ip': ip } })).status);
+    for (let i = 0; i < 4; i++) {
+      const res = await fetch(`${base}/api/games`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-client-ip': `9.9.9.${i}`, 'cf-connecting-ip': `8.8.8.${i}` }, // no cookie, new "address" each time
+        body: '{}',
+      });
+      statuses.push(res.status);
     }
-    assert.deepEqual(statuses, [200, 200]);
+    assert.deepEqual(statuses, [201, 201, 429, 429]);
+  } finally {
+    server.close();
+    server.closeAllConnections?.();
+  }
+});
+
+test('node server: a request target that is not origin-form is rejected', async () => {
+  await withNode(async (_base, port) => {
+    assert.equal((await raw(port, { method: 'GET', path: '//evil.example/api/maps' })).statusCode, 400);
   });
 });
 

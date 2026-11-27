@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { GRACE_MS } from '../src/game.js';
-import { fixtureService } from './fixtures.js';
+import { GRACE_MS, createGameService } from '../src/game.js';
+import { score } from '../src/scoring.js';
+import { fixtureMap, fixtureService } from './fixtures.js';
 
 const ME = 'user-me';
 const YOU = 'user-you';
@@ -178,10 +179,19 @@ test('timer: time spent on the result screen never counts against the next round
 });
 
 test('a game keeps the scale it started with, even if the map changes later', async () => {
-  const { service, store } = fixtureService();
+  const { service, store, clock } = fixtureService();
   const g = await service.startGame(ME);
-  const stored = await store.get(g.game_id);
-  assert.equal(stored.scale_km, 14917);
+  await service.startRound(ME, g.game_id, 1);
+  const spot = (await store.get(g.game_id)).rounds[0];
+  const nearby = { lat: spot.true_lat + 1, lng: spot.true_lng }; // about 111 km off
+
+  // The same games, now served by a service whose map file changed its scale.
+  const changed = fixtureMap();
+  changed.scale_km = 1000;
+  const later = createGameService({ maps: [changed], store, now: () => clock.t });
+  const res = await later.submitGuess(ME, g.game_id, 1, nearby);
+  assert.equal(res.score, score(res.distance_km, 14917), 'scored on the scale the game started with');
+  assert.notEqual(res.score, score(res.distance_km, 1000));
 });
 
 test('concurrent writes: a stale copy of the game is rejected with a conflict', async () => {

@@ -7,5 +7,3 @@ CREATE TABLE games (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 ) STRICT;
-
-CREATE INDEX games_user_created ON games (user_id, created_at);

@@ -38,6 +38,8 @@ export function createNodeServer({ handle, publicDir = join(ROOT, 'public') }) {
     try {
       let url;
       try {
+        // Only origin-form targets ("/path"): "//host/path" or an absolute URL would change url.origin.
+        if (!/^\/(?!\/)/.test(req.url)) throw new Error('bad target');
         url = new URL(req.url, `http://${req.headers.host ?? 'localhost'}`);
       } catch {
         res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8', ...SECURITY_HEADERS }).end('Bad request');
@@ -52,11 +54,12 @@ export function createNodeServer({ handle, publicDir = join(ROOT, 'public') }) {
         const hasBody = req.method !== 'GET';
         const body = hasBody ? await readBody(req) : undefined;
         if (hasBody && body === null) {
-          res.writeHead(413, { 'content-type': 'application/json', ...SECURITY_HEADERS }).end('{"error":"too_large"}');
+          res.writeHead(413, { 'content-type': 'application/json', ...SECURITY_HEADERS }).end('{"error":"too_large","message":"Request body is too large."}');
           return;
         }
         // The client address comes from the socket, never from a header the caller could set.
         const headers = { ...req.headers, 'x-client-ip': req.socket.remoteAddress ?? 'unknown' };
+        delete headers['cf-connecting-ip'];
         const response = await handle(new Request(url, { method: req.method, headers, body }));
         const out = {};
         for (const [k, v] of response.headers) if (k !== 'set-cookie') out[k] = v;

@@ -2,6 +2,7 @@
 // Node runs it through src/server.js; a Cloudflare Worker calls it from its fetch handler.
 
 import { HttpError } from './errors.js';
+import { createLimiter } from './limiter.js';
 
 const MAX_BODY_BYTES = 10_000;
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
@@ -9,23 +10,6 @@ const UUID_RE = new RegExp(`^${UUID}$`, 'i');
 const GAME_PATH = new RegExp(`^/api/games/(${UUID})$`, 'i');
 const START_PATH = new RegExp(`^/api/games/(${UUID})/rounds/(\\d{1,2})/start$`, 'i');
 const GUESS_PATH = new RegExp(`^/api/games/(${UUID})/rounds/(\\d{1,2})/guess$`, 'i');
-
-/** Sliding-window limiter. Old entries are swept on a timer, so memory stays bounded. */
-function createLimiter({ windowMs, max }) {
-  const hits = new Map();
-  let lastSweep = 0;
-  return (key, t) => {
-    if (t - lastSweep > windowMs) {
-      lastSweep = t;
-      for (const [k, times] of hits) if (!times.some((x) => t - x < windowMs)) hits.delete(k);
-    }
-    const recent = (hits.get(key) ?? []).filter((x) => t - x < windowMs);
-    const allowed = recent.length < max;
-    if (allowed) recent.push(t);
-    hits.set(key, recent);
-    return allowed;
-  };
-}
 
 /**
  * Default identity: guests get a random id kept in a cookie (local development).
@@ -100,11 +84,17 @@ function concatChunks(chunks, size) {
   return out;
 }
 
-/** Best-effort client address: set by Cloudflare, or by the Node adapter from the socket. */
-const clientIp = (request) =>
-  request.headers.get('cf-connecting-ip') ?? request.headers.get('x-client-ip') ?? 'unknown';
+/** Dev default: the Node adapter stamps x-client-ip from the socket. A Worker passes its own (see edge.js). */
+const socketClientIp = (request) => request.headers.get('x-client-ip') ?? 'unknown';
 
-export function createApp({ service, env = {}, now = Date.now, limits = {}, identify = guestIdentity }) {
+export function createApp({
+  service,
+  env = {},
+  now = Date.now,
+  limits = {},
+  identify = guestIdentity,
+  clientIp = socketClientIp,
+}) {
   const gamesPerUser = createLimiter({ windowMs: 3_600_000, max: limits.gamesPerHour ?? 30 });
   const gamesPerIp = createLimiter({ windowMs: 3_600_000, max: limits.gamesPerHourPerIp ?? 90 });
   const guessLimit = createLimiter({ windowMs: 1000, max: limits.guessesPerSecond ?? 1 });
@@ -124,7 +114,8 @@ export function createApp({ service, env = {}, now = Date.now, limits = {}, iden
     }
     if (pathname === '/api/games' && method === 'POST') {
       const t = now();
-      if (!gamesPerUser(userId, t) || !gamesPerIp(clientIp(request), t)) {
+      // Address first: a refused request must not leave a new per-user key behind.
+      if (!gamesPerIp.allow(clientIp(request), t) || !gamesPerUser.allow(userId, t)) {
         throw new HttpError(429, 'rate_limited', 'Too many new games. Try again later.');
       }
       return { status: 201, body: await service.startGame(userId, await readJsonObject(request)) };
@@ -137,7 +128,7 @@ export function createApp({ service, env = {}, now = Date.now, limits = {}, iden
       return { body: await service.startRound(userId, m[1].toLowerCase(), Number(m[2])) };
     }
     if ((m = GUESS_PATH.exec(pathname)) && method === 'POST') {
-      if (!guessLimit(`${userId}:${m[1].toLowerCase()}`, now())) {
+      if (!guessLimit.allow(`${userId}:${m[1].toLowerCase()}`, now())) {
         throw new HttpError(429, 'rate_limited', 'Slow down: one guess per second.');
       }
       const body = await readJsonObject(request);

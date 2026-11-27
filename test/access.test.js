@@ -35,14 +35,15 @@ const goodClaims = (over = {}) => ({
   ...over,
 });
 
-function setup(keys) {
+function setup(keys, { teamDomain = TEAM } = {}) {
+  const clock = { t: NOW };
   let fetches = 0;
   const fetchImpl = async () => {
     fetches += 1;
     return new Response(JSON.stringify({ keys: keys.map((k) => k.jwk) }));
   };
-  const verify = createAccessVerifier({ teamDomain: TEAM, audience: AUD, fetchImpl, now: () => NOW });
-  return { verify, fetches: () => fetches };
+  const verify = createAccessVerifier({ teamDomain, audience: AUD, fetchImpl, now: () => clock.t });
+  return { verify, clock, fetches: () => fetches };
 }
 
 test('accepts a valid token and returns the stable subject', async () => {
@@ -87,27 +88,105 @@ test('rejects missing, malformed and oversized tokens', async () => {
   }
 });
 
-test('refetches keys for an unknown kid (rotation) and fails closed when keys are unavailable', async () => {
+test('keys are cached: many verifications, one fetch', async () => {
+  const key = await makeKey('k1');
+  const { verify, fetches } = setup([key]);
+  const token = await sign(key, 'k1', goodClaims());
+  for (let i = 0; i < 5; i++) await verify(token);
+  assert.equal(fetches(), 1);
+});
+
+test('concurrent first requests share one fetch', async () => {
+  const key = await makeKey('k1');
+  const { verify, fetches } = setup([key]);
+  const token = await sign(key, 'k1', goodClaims());
+  await Promise.all(Array.from({ length: 10 }, () => verify(token)));
+  assert.equal(fetches(), 1);
+});
+
+test('a rotated key is picked up, but unknown kids cannot trigger a fetch flood', async () => {
   const old = await makeKey('k1');
   const rotated = await makeKey('k2');
   const keys = [old];
+  const { verify, clock, fetches } = setup(keys);
+  await verify(await sign(old, 'k1', goodClaims()));
+  assert.equal(fetches(), 1);
+
+  keys.push(rotated);
+  // An attacker sends valid-looking tokens with made-up kids: at most one refetch per minute, and they all fail.
+  for (let i = 0; i < 20; i++) {
+    const fake = await makeKey(`fake-${i}`);
+    await assert.rejects(verify(await sign(fake, `fake-${i}`, goodClaims())), { status: 401 });
+  }
+  assert.equal(fetches(), 1, 'throttled: no refetch within a minute of the last attempt');
+
+  clock.t += 61_000;
+  await verify(await sign(rotated, 'k2', goodClaims({ exp: clock.t / 1000 + 600 })));
+  assert.equal(fetches(), 2);
+});
+
+test('keys are refreshed after the TTL, and a failed refresh keeps using the cached keys', async () => {
+  const key = await makeKey('k1');
+  let up = true;
+  let fetches = 0;
+  const clock = { t: NOW };
   const verify = createAccessVerifier({
     teamDomain: TEAM,
     audience: AUD,
-    now: () => NOW,
-    fetchImpl: async () => new Response(JSON.stringify({ keys: keys.map((k) => k.jwk) })),
+    now: () => clock.t,
+    fetchImpl: async () => {
+      fetches += 1;
+      return up ? new Response(JSON.stringify({ keys: [key.jwk] })) : new Response('down', { status: 500 });
+    },
   });
-  await verify(await sign(old, 'k1', goodClaims()));
-  keys.push(rotated);
-  await verify(await sign(rotated, 'k2', goodClaims()));
+  await verify(await sign(key, 'k1', goodClaims()));
+  up = false;
+  clock.t += 3_700_000; // past the one-hour TTL
+  const later = await sign(key, 'k1', goodClaims({ exp: clock.t / 1000 + 600 }));
+  const who = await verify(later);
+  assert.equal(who.sub, 'user-1', 'still works on the cached key');
+  assert.equal(fetches, 2, 'it did try to refresh');
+});
 
+test('with no cached keys and Cloudflare unreachable, it fails closed with 503', async () => {
+  const key = await makeKey('k1');
   const down = createAccessVerifier({
     teamDomain: TEAM,
     audience: AUD,
     now: () => NOW,
     fetchImpl: async () => new Response('nope', { status: 500 }),
   });
-  await assert.rejects(down(await sign(old, 'k1', goodClaims())), { status: 503 });
+  await assert.rejects(down(await sign(key, 'k1', goodClaims())), { status: 503 });
+});
+
+test('claim edge cases: string aud, missing exp, expiry and not-before skew boundaries', async () => {
+  const key = await makeKey('k1');
+  const { verify } = setup([key]);
+  await verify(await sign(key, 'k1', goodClaims({ aud: AUD })));
+  await assert.rejects(verify(await sign(key, 'k1', goodClaims({ exp: undefined }))), { status: 401 });
+
+  const t = NOW / 1000;
+  await verify(await sign(key, 'k1', goodClaims({ exp: t - 30 }))); // inside the 30 s skew
+  await assert.rejects(verify(await sign(key, 'k1', goodClaims({ exp: t - 31 }))), { status: 401 });
+  await verify(await sign(key, 'k1', goodClaims({ nbf: t + 30 })));
+  await assert.rejects(verify(await sign(key, 'k1', goodClaims({ nbf: t + 31 }))), { status: 401 });
+});
+
+test('malformed tokens are 401, never a crash', async () => {
+  const key = await makeKey('k1');
+  const { verify } = setup([key]);
+  const good = await sign(key, 'k1', goodClaims());
+  const [h, p] = good.split('.');
+  const nullPart = Buffer.from('null').toString('base64url');
+  for (const bad of [`${nullPart}.${p}.x`, `${h}.${nullPart}.x`, `${h}.${p}.!!!not-base64!!!`, `${h}.${p}.`]) {
+    await assert.rejects(verify(bad), { status: 401 }, bad);
+  }
+});
+
+test('a capitalised team domain still matches the issuer', async () => {
+  const key = await makeKey('k1');
+  const { verify } = setup([key], { teamDomain: 'Margaux.CloudflareAccess.com' });
+  await verify(await sign(key, 'k1', goodClaims()));
 });
 
 test('refuses to be built with a bad team domain or no audience', () => {

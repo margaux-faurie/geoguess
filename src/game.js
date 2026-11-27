@@ -222,7 +222,7 @@ export function createGameService({
         cur.guess_lng = guess.lng;
         cur.distance_km =
           Math.round(haversineKm(guess.lat, guess.lng, cur.true_lat, cur.true_lng) * 1000) / 1000;
-        cur.score = score(cur.distance_km, game.scale_km);
+        cur.score = score(cur.distance_km, game.scale_km ?? mapsById.get(game.map_id)?.scale_km);
       }
       game.total_score += cur.score;
 

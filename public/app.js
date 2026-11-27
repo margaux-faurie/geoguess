@@ -267,7 +267,17 @@ async function submit() {
 async function resync() {
   try {
     const { body } = await api(`/api/games/${state.game.id}`);
-    if (body.status === 'in_progress') beginGame(body, true);
+    if (body.results.length > state.results.length) {
+      // A guess went through but its answer never reached us: show that result before moving on.
+      state.results = body.results;
+      state.game.total = body.total_score;
+      showResult({
+        ...body.results.at(-1),
+        total_score: body.total_score,
+        finished: body.status === 'finished',
+        next_round_no: body.current_round?.round_no ?? null,
+      });
+    } else if (body.status === 'in_progress') beginGame(body, true);
     else {
       state.results = body.results;
       state.game.total = body.total_score;
@@ -311,7 +321,7 @@ function showResult(res) {
   $('#next').onclick = () => {
     clearNotice('timeout');
     if (res.finished) showSummary();
-    else enterRound(res.next_round_no);
+    else enterRound(res.next_round_no, true);
   };
   $('#next').focus();
 }
@@ -353,7 +363,7 @@ function beginGame(view, resumed = false) {
   else enterRound(round.round_no);
 }
 
-async function enterRound(roundNo) {
+async function enterRound(roundNo, fromResult = false) {
   setView('loading');
   try {
     const { body } = await api(`/api/games/${state.game.id}/rounds/${roundNo}/start`, { method: 'POST', body: '{}' });
@@ -361,7 +371,9 @@ async function enterRound(roundNo) {
     startRound(body);
   } catch (e) {
     notice(e.message);
-    setView('setup');
+    if (e.status === 409) return resync();
+    // The game is still there: go back to where the player was so they can try again.
+    setView(fromResult ? 'result' : 'setup');
   }
 }
 

@@ -77,5 +77,6 @@ test('worker app: Access login required, games are per user, a full guess works'
     body: JSON.stringify({ guess: { lat: 0, lng: 0 } }),
   });
   assert.equal(guess.status, 200);
-  assert.ok(guess.body.score >= 0 || guess.body.result?.score >= 0);
+  assert.equal(typeof guess.body.score, 'number');
+  assert.equal(guess.body.total_score, guess.body.score);
 });

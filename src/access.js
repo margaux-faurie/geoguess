@@ -6,6 +6,7 @@
 import { HttpError } from './errors.js';
 
 const JWKS_TTL_MS = 3_600_000;
+const MIN_REFRESH_MS = 60_000; // never refetch the keys more often than this, whatever tokens arrive
 const CLOCK_SKEW_S = 30;
 const MAX_TOKEN_CHARS = 8_192;
 
@@ -34,10 +35,12 @@ export function createAccessVerifier({ teamDomain, audience, fetchImpl = fetch, 
     throw new Error('ACCESS_TEAM_DOMAIN must look like "<team>.cloudflareaccess.com".');
   }
   if (!audience) throw new Error('ACCESS_AUD is required.');
-  const issuer = `https://${teamDomain}`;
-  let cache = { keys: new Map(), fetchedAt: 0 };
+  const issuer = `https://${teamDomain.toLowerCase()}`;
+  let cache = { keys: new Map(), fetchedAt: -Infinity };
+  let lastAttempt = -Infinity;
+  let refreshing = null;
 
-  async function refreshKeys() {
+  async function fetchKeys() {
     const res = await fetchImpl(`${issuer}/cdn-cgi/access/certs`);
     if (!res.ok) throw new Error(`Could not fetch Access keys (${res.status}).`);
     const { keys } = await res.json();
@@ -52,13 +55,39 @@ export function createAccessVerifier({ teamDomain, audience, fetchImpl = fetch, 
     cache = { keys: next, fetchedAt: now() };
   }
 
+  /** One shared fetch for concurrent callers. */
+  function refreshKeys() {
+    refreshing ??= fetchKeys().finally(() => {
+      refreshing = null;
+    });
+    return refreshing;
+  }
+
   async function keyFor(kid) {
-    if (now() - cache.fetchedAt > JWKS_TTL_MS || !cache.keys.has(kid)) {
-      // Unknown kid: refetch at most once per call (keys rotate), never trust the token's own key.
-      await refreshKeys();
+    if (refreshing) {
+      // Someone is already fetching: wait for that instead of failing a valid token that arrived a moment too early.
+      try {
+        await refreshing;
+      } catch (e) {
+        if (cache.keys.size === 0) throw e;
+      }
+    }
+    const stale = now() - cache.fetchedAt > JWKS_TTL_MS;
+    // Keys rotate, so an unknown kid may trigger a refetch, but at most once a minute (success or not):
+    // a flood of made-up kids must not become a flood of requests to Cloudflare.
+    if ((stale || !cache.keys.has(kid)) && now() - lastAttempt >= MIN_REFRESH_MS) {
+      lastAttempt = now();
+      try {
+        await refreshKeys();
+      } catch (e) {
+        if (cache.keys.size === 0) throw e; // nothing cached: fail closed. Otherwise keep using the old keys.
+        console.error('access keys refresh failed, using cached keys', e.message);
+      }
     }
     return cache.keys.get(kid) ?? null;
   }
+
+  const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
   return async function verify(token) {
     if (!token || token.length > MAX_TOKEN_CHARS) throw unauthorized();
@@ -73,6 +102,7 @@ export function createAccessVerifier({ teamDomain, audience, fetchImpl = fetch, 
     } catch {
       throw unauthorized();
     }
+    if (!isObject(header) || !isObject(claims)) throw unauthorized();
     if (header.alg !== 'RS256' || typeof header.kid !== 'string') throw unauthorized();
 
     let key;
@@ -84,12 +114,17 @@ export function createAccessVerifier({ teamDomain, audience, fetchImpl = fetch, 
     }
     if (!key) throw unauthorized();
 
-    const valid = await crypto.subtle.verify(
-      'RSASSA-PKCS1-v1_5',
-      key,
-      b64urlToBytes(parts[2]),
-      new TextEncoder().encode(`${parts[0]}.${parts[1]}`),
-    );
+    let valid;
+    try {
+      valid = await crypto.subtle.verify(
+        'RSASSA-PKCS1-v1_5',
+        key,
+        b64urlToBytes(parts[2]),
+        new TextEncoder().encode(`${parts[0]}.${parts[1]}`),
+      );
+    } catch {
+      throw unauthorized(); // a signature that is not even valid base64
+    }
     if (!valid) throw unauthorized();
 
     const t = Math.floor(now() / 1000);

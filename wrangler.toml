@@ -2,6 +2,11 @@ name = "guessgeo"
 main = "src/worker.js"
 compatibility_date = "2026-11-01"
 
+# Only the custom domain, behind Access: no public workers.dev or preview address.
+workers_dev = false
+preview_urls = false
+routes = [{ pattern = "guessgeo.margauxfaurie.com", custom_domain = true }]
+
 # Static files are served by Cloudflare; only /api/* runs the Worker.
 [assets]
 directory = "./public"

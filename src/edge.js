@@ -20,5 +20,7 @@ export function createEdgeApp({ env, db, locations, fetchImpl, now }) {
     store: createD1Store(db, now),
     now,
   });
-  return createApp({ service, env, now, identify: accessIdentity(verify) });
+  // On Cloudflare the edge sets cf-connecting-ip; nothing else is trusted for the client address.
+  const clientIp = (request) => request.headers.get('cf-connecting-ip') ?? 'unknown';
+  return createApp({ service, env, now, identify: accessIdentity(verify), clientIp });
 }
