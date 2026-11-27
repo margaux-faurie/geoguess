@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 360" role="img" aria-labelledby="t d">
+  <title id="t">guessgeo</title>
+  <desc id="d">guessgeo: Street View drops you somewhere, you pin where you think it is. A dashed great-circle line joins an orange guess pin to the navy true place.</desc>
+  <rect width="1200" height="360" fill="#fbf9f5"/>
+  <rect x="24" y="24" width="1152" height="312" rx="32" fill="#ffb38a"/>
+  <!-- a quiet globe: meridians and parallels -->
+  <circle cx="905" cy="180" r="132" fill="#fbf9f5"/>
+  <g transform="translate(905 180)" fill="none" stroke="#0c0b0a" stroke-opacity="0.22" stroke-width="2">
+    <circle r="132"/>
+    <ellipse rx="66" ry="132"/>
+    <ellipse rx="110" ry="132"/>
+    <line x1="0" y1="-132" x2="0" y2="132"/>
+    <ellipse rx="132" ry="44"/>
+    <line x1="-132" y1="0" x2="132" y2="0"/>
+    <path d="M-118 -60 H118 M-118 60 H118"/>
+  </g>
+  <!-- guess, great-circle line, true place -->
+  <path d="M812 238 Q 880 70 1000 120" fill="none" stroke="#0c0b0a" stroke-width="4" stroke-dasharray="10 9" stroke-linecap="round"/>
+  <circle cx="812" cy="238" r="15" fill="#ffb38a" stroke="#0c0b0a" stroke-width="4"/>
+  <circle cx="1000" cy="120" r="15" fill="#14284b" stroke="#fbf9f5" stroke-width="4"/>
+  <circle cx="1000" cy="120" r="17" fill="none" stroke="#14284b" stroke-width="1.5"/>
+  <g font-family="'Bricolage Grotesque', 'Helvetica Neue', Helvetica, Arial, sans-serif" fill="#0c0b0a">
+    <text x="88" y="168" font-size="96" font-weight="700" letter-spacing="-2">Where is this?</text>
+    <text x="92" y="226" font-size="28">Street View drops you somewhere.</text>
+    <text x="92" y="266" font-size="28">Pin where it is. Closer scores more.</text>
+  </g>
+</svg>
