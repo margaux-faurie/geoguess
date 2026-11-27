@@ -51,8 +51,12 @@ body { background: var(--paper); color: var(--ink); font: 400 17px/1.6 var(--san
 .btn:focus-visible, select:focus-visible, .home:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 
 /* Views: only what belongs to the current view is shown */
-#pano { position: fixed; inset: 0; visibility: hidden; }
-body[data-view="play"] #pano, body[data-view="result"] #pano { visibility: visible; }
+/* Google Maps rewrites the inline style of the element it renders into (position: relative), which
+   would undo a fixed, full-screen layout and leave it 0 px high. So the layout lives on a frame and
+   the panorama simply fills it. */
+#pano-frame { position: fixed; inset: 0; visibility: hidden; }
+#pano { width: 100%; height: 100%; }
+body[data-view="play"] #pano-frame, body[data-view="result"] #pano-frame { visibility: visible; }
 #lock { position: fixed; inset: 0; z-index: 2; display: none; }
 body[data-view="play"][data-movement="nmpz"] #lock { display: block; }
 
