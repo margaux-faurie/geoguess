@@ -9,6 +9,11 @@ The server owns the game: it picks the places, keeps their coordinates secret un
 **Status:** live at [guessgeo.margauxfaurie.com](https://guessgeo.margauxfaurie.com) since 28 Nov 2026, behind Cloudflare Access (invited people only). Tested in a browser on desktop and phone sizes, locally and online. No npm dependencies, no build step, Node 20 or newer.
 
 <p align="center">
+  <a href="docs/video/guessgeo-teaser.mp4"><img src="docs/video/guessgeo-teaser-poster.jpg" width="80%" alt="Teaser video poster: a round's result card reading 64 km away, 4,789 points, over the Street View panorama near Madrid."></a>
+  <br><sub><a href="docs/video/guessgeo-teaser.mp4">Watch the 30 s teaser</a>: one real game, from the first panorama to the final score. Imagery © Google; maps © OpenFreeMap, OpenStreetMap contributors (<a href="docs/video/LICENSE.txt">rights</a>).</sub>
+</p>
+
+<p align="center">
   <img src="docs/assets/result.jpg" width="80%" alt="A round's result: the orange guess off Sumatra, a dashed line to the navy true place in Kuala Lumpur, and a card reading 931 km away, 2,679 points.">
   <br><sub>A round's result. Map © OpenFreeMap, OpenMapTiles, OpenStreetMap contributors.</sub>
 </p>
