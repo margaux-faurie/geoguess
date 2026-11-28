@@ -94,7 +94,6 @@ export function createGuessMap(container, { onPick, onError, interactive = true,
     onError?.('The map could not load. Check your connection and reload.');
   };
   map.on('error', (e) => { if (!map.isStyleLoaded()) { console.warn('[guessgeo] map', e?.error?.message); fail(); } });
-  setTimeout(fail, 20_000);
 
   ready.then(() => {
     map.addSource('route', { type: 'geojson', data: lineFeatures([]) });
@@ -159,6 +158,8 @@ export function createGuessMap(container, { onPick, onError, interactive = true,
     reset() {
       clear();
       picking = true;
+      // A map hidden since the page opened (launch screen) may not load until it is shown: time it from here.
+      setTimeout(fail, 20_000);
       map.resize();
       map.jumpTo(WORLD);
     },

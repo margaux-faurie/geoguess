@@ -1,4 +1,5 @@
 import { createGuessMap } from './guessmap.js';
+import { createLanding } from './landing.js';
 
 // guessgeo client. No build step. Street View comes from the Maps JavaScript API; the guess map is
 // MapLibre with OpenStreetMap tiles (see guessmap.js).
@@ -26,8 +27,15 @@ let resultShownAt = 0;
 let startPano = null; // where the round began, for "Back to start"
 let noticeKey = '';
 
+let landing = null;
+
 function setView(view) {
   document.body.dataset.view = view;
+  // The launch screen's demo plays only while that screen is shown (it fetches map tiles).
+  if (view === 'setup' && window.maplibregl) {
+    landing ??= createLanding($('#landing-map'), $('#demo-card'));
+    landing.start();
+  } else landing?.stop();
 }
 
 function notice(text, key = 'general') {
