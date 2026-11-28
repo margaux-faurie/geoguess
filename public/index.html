@@ -53,30 +53,51 @@
     </div>
   </section>
 
-  <section id="setup" class="screen">
-    <div class="panel">
-      <h1 class="display">Where is this?</h1>
-      <p class="lead">Street View drops you somewhere. Pin where you think it is. Five rounds, and closer scores more.</p>
+  <section id="setup" class="screen setup">
+    <!-- Behind the form, the page plays a round by itself: a pin drops, the answer appears, the miss is measured. -->
+    <div id="landing-map" class="landing-map" aria-hidden="true"></div>
+    <p id="demo-card" class="demo-card" aria-hidden="true" hidden>
+      <span id="demo-place"></span>
+      <strong id="demo-dist"></strong>
+      <span id="demo-pts"></span>
+    </p>
+
+    <div class="panel setup-panel">
+      <h1 class="display title">Where is this<span class="qmark" aria-hidden="true"><span class="qhook">?</span><i class="qpin"></i></span><span class="visually-hidden">?</span></h1>
+      <p class="lead">Street View drops you somewhere in the world. Look around, pin where you think you are. Five rounds; the closer, the more points.</p>
+
       <form id="setup-form">
-        <div class="fields">
-          <label class="field">Movement
-            <select name="movement">
-              <option value="move">Move around</option>
-              <option value="nomove">No moving</option>
-              <option value="nmpz">No moving, panning or zooming</option>
-            </select>
+        <fieldset class="choice" id="movement-field">
+          <legend>How you play</legend>
+          <label class="option">
+            <input type="radio" name="movement" value="move" checked>
+            <span class="glyph glyph-move" aria-hidden="true"></span>
+            <span class="option-text"><b>Walk around</b><small>Follow the roads, read the signs</small></span>
           </label>
-          <label class="field">Time per round
-            <select name="time">
-              <option value="0">No limit</option>
-              <option value="30">30 seconds</option>
-              <option value="60">1 minute</option>
-              <option value="120">2 minutes</option>
-              <option value="180">3 minutes</option>
-            </select>
+          <label class="option">
+            <input type="radio" name="movement" value="nomove">
+            <span class="glyph glyph-look" aria-hidden="true"></span>
+            <span class="option-text"><b>Stay put</b><small>Turn and zoom, but no walking</small></span>
           </label>
-        </div>
-        <button type="submit" class="btn ink">Start</button>
+          <label class="option">
+            <input type="radio" name="movement" value="nmpz">
+            <span class="glyph glyph-frozen" aria-hidden="true"></span>
+            <span class="option-text"><b>Frozen</b><small>One view, nothing moves</small></span>
+          </label>
+        </fieldset>
+
+        <fieldset class="choice choice-time" id="time-field">
+          <legend>Time per round</legend>
+          <div class="segments">
+            <label><input type="radio" name="time" value="0" checked><span>No limit</span></label>
+            <label><input type="radio" name="time" value="30"><span>30 s</span></label>
+            <label><input type="radio" name="time" value="60"><span>1 min</span></label>
+            <label><input type="radio" name="time" value="120"><span>2 min</span></label>
+            <label><input type="radio" name="time" value="180"><span>3 min</span></label>
+          </div>
+        </fieldset>
+
+        <button type="submit" class="btn ink go">Drop me somewhere</button>
       </form>
     </div>
   </section>
