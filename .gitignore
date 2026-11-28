@@ -4,3 +4,4 @@ node_modules/
 data/locations.json
 data/games.json
 data/*.tmp
+data/locations.sql
