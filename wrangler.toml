@@ -15,12 +15,12 @@ run_worker_first = ["/api/*"]
 [[d1_databases]]
 binding = "DB"
 database_name = "guessgeo"
-database_id = "REPLACE_WITH_ID_FROM_wrangler_d1_create"
+database_id = "94867872-2911-4f72-9938-e02aae6a5e48"
 migrations_dir = "migrations"
 
 [vars]
 # Cloudflare Zero Trust > Access > Applications: team domain and the application's AUD tag (both public identifiers).
-ACCESS_TEAM_DOMAIN = ""
+ACCESS_TEAM_DOMAIN = "margauxfaurie.cloudflareaccess.com"
 ACCESS_AUD = ""
 
 # Secret, set with `wrangler secret put GOOGLE_MAPS_API_KEY` (the browser key, restricted to the site's domain).
