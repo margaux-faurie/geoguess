@@ -1,61 +1,111 @@
 // Runtime-agnostic request handler (Web standard Request -> Response).
-// Node runs it through src/server.js; a Cloudflare Worker can call it from its fetch handler.
+// Node runs it through src/server.js; a Cloudflare Worker calls it from its fetch handler.
 
 import { HttpError } from './errors.js';
+import { createLimiter } from './limiter.js';
 
 const MAX_BODY_BYTES = 10_000;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function createLimiter({ windowMs, max }) {
-  const hits = new Map();
-  return (key, t) => {
-    const recent = (hits.get(key) ?? []).filter((x) => t - x < windowMs);
-    if (recent.length >= max) {
-      hits.set(key, recent);
-      return false;
-    }
-    recent.push(t);
-    hits.set(key, recent);
-    if (hits.size > 5000) for (const k of hits.keys()) if (!hits.get(k).some((x) => t - x < windowMs)) hits.delete(k);
-    return true;
-  };
-}
+const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const UUID_RE = new RegExp(`^${UUID}$`, 'i');
+const GAME_PATH = new RegExp(`^/api/games/(${UUID})$`, 'i');
+const START_PATH = new RegExp(`^/api/games/(${UUID})/rounds/(\\d{1,2})/start$`, 'i');
+const REPLACE_PATH = new RegExp(`^/api/games/(${UUID})/rounds/(\\d{1,2})/replace$`, 'i');
+const GUESS_PATH = new RegExp(`^/api/games/(${UUID})/rounds/(\\d{1,2})/guess$`, 'i');
 
 /**
- * Who is playing. Guests get a random id kept in a cookie.
- * Swap this function for Cloudflare Access (Cf-Access-Authenticated-User-Email) or real accounts later.
+ * Default identity: guests get a random id kept in a cookie (local development).
+ * Production passes an `identify` that verifies Cloudflare Access (see src/access.js).
+ * Contract: (request, url) -> { userId, setCookie } | Promise of it; throws HttpError(401/403) to refuse.
  */
-function identify(request, url) {
+export function guestIdentity(request, url) {
+  const secure = url.protocol === 'https:';
+  const name = secure ? '__Host-gid' : 'gid'; // __Host- needs Secure + Path=/ and no Domain: a sibling site cannot set it
   const cookie = request.headers.get('cookie') ?? '';
-  const found = /(?:^|;\s*)gid=([^;]+)/.exec(cookie)?.[1];
-  if (found && UUID.test(found)) return { userId: found, setCookie: null };
+  const found = new RegExp(`(?:^|;\\s*)${name}=([^;]+)`).exec(cookie)?.[1];
+  if (found && UUID_RE.test(found)) return { userId: found, setCookie: null };
   const userId = globalThis.crypto.randomUUID();
-  const secure = url.protocol === 'https:' ? '; Secure' : '';
   return {
     userId,
-    setCookie: `gid=${userId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${secure}`,
+    setCookie: `${name}=${userId}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000${secure ? '; Secure' : ''}`,
   };
 }
 
-async function readJson(request) {
-  const text = await request.text();
-  if (text.length > MAX_BODY_BYTES) throw new HttpError(413, 'too_large', 'Request body is too large.');
-  if (!text.trim()) return {};
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new HttpError(400, 'bad_json', 'The request body is not valid JSON.');
+/** Same-origin JSON only: closes the door on form posts and cross-site requests. */
+function assertSameOriginJson(request, url) {
+  const origin = request.headers.get('origin');
+  if (origin !== null && origin !== url.origin) {
+    throw new HttpError(403, 'forbidden_origin', 'Cross-site requests are not allowed.');
+  }
+  if (!(request.headers.get('content-type') ?? '').toLowerCase().startsWith('application/json')) {
+    throw new HttpError(415, 'unsupported_media_type', 'Send application/json.');
   }
 }
 
-export function createApp({ service, env = {}, now = Date.now, limits = {} }) {
-  const gameCreateLimit = createLimiter({ windowMs: 3_600_000, max: limits.gamesPerHour ?? 30 });
+/** Read at most MAX_BODY_BYTES (counted in bytes while streaming), and require a JSON object. */
+async function readJsonObject(request) {
+  const declared = Number(request.headers.get('content-length'));
+  if (declared > MAX_BODY_BYTES) throw new HttpError(413, 'too_large', 'Request body is too large.');
+
+  const chunks = [];
+  let size = 0;
+  if (request.body) {
+    const reader = request.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_BODY_BYTES) {
+        await reader.cancel();
+        throw new HttpError(413, 'too_large', 'Request body is too large.');
+      }
+      chunks.push(value);
+    }
+  }
+  const text = new TextDecoder().decode(concatChunks(chunks, size));
+  if (!text.trim()) return {};
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new HttpError(400, 'bad_json', 'The request body is not valid JSON.');
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new HttpError(400, 'bad_json', 'Send a JSON object.');
+  }
+  return parsed;
+}
+
+function concatChunks(chunks, size) {
+  const out = new Uint8Array(size);
+  let offset = 0;
+  for (const c of chunks) {
+    out.set(c, offset);
+    offset += c.byteLength;
+  }
+  return out;
+}
+
+/** Dev default: the Node adapter stamps x-client-ip from the socket. A Worker passes its own (see edge.js). */
+const socketClientIp = (request) => request.headers.get('x-client-ip') ?? 'unknown';
+
+export function createApp({
+  service,
+  env = {},
+  now = Date.now,
+  limits = {},
+  identify = guestIdentity,
+  clientIp = socketClientIp,
+}) {
+  const gamesPerUser = createLimiter({ windowMs: 3_600_000, max: limits.gamesPerHour ?? 30 });
+  const gamesPerIp = createLimiter({ windowMs: 3_600_000, max: limits.gamesPerHourPerIp ?? 90 });
   const guessLimit = createLimiter({ windowMs: 1000, max: limits.guessesPerSecond ?? 1 });
 
   async function route(request, url, userId) {
     const { pathname } = url;
     const method = request.method;
     let m;
+
+    if (method === 'POST') assertSameOriginJson(request, url);
 
     if (pathname === '/api/config' && method === 'GET') {
       return { body: { maps_key: env.GOOGLE_MAPS_API_KEY || null } };
@@ -64,32 +114,45 @@ export function createApp({ service, env = {}, now = Date.now, limits = {} }) {
       return { body: service.listMaps() };
     }
     if (pathname === '/api/games' && method === 'POST') {
-      if (!gameCreateLimit(userId, now())) {
+      const t = now();
+      // Address first: a refused request must not leave a new per-user key behind.
+      if (!gamesPerIp.allow(clientIp(request), t) || !gamesPerUser.allow(userId, t)) {
         throw new HttpError(429, 'rate_limited', 'Too many new games. Try again later.');
       }
-      return { status: 201, body: await service.startGame(userId, await readJson(request)) };
+      return { status: 201, body: await service.startGame(userId, await readJsonObject(request)) };
     }
-    if ((m = /^\/api\/games\/([^/]+)$/.exec(pathname)) && method === 'GET') {
-      return { body: await service.getGame(userId, m[1]) };
+    if ((m = GAME_PATH.exec(pathname)) && method === 'GET') {
+      return { body: await service.getGame(userId, m[1].toLowerCase()) };
     }
-    if ((m = /^\/api\/games\/([^/]+)\/rounds\/(\d+)\/guess$/.exec(pathname)) && method === 'POST') {
-      if (!guessLimit(`${userId}:${m[1]}`, now())) {
+    if ((m = START_PATH.exec(pathname)) && method === 'POST') {
+      await readJsonObject(request);
+      return { body: await service.startRound(userId, m[1].toLowerCase(), Number(m[2])) };
+    }
+    if ((m = REPLACE_PATH.exec(pathname)) && method === 'POST') {
+      const body = await readJsonObject(request);
+      return { body: await service.replaceRound(userId, m[1].toLowerCase(), Number(m[2]), body.failed_pano_id) };
+    }
+    if ((m = GUESS_PATH.exec(pathname)) && method === 'POST') {
+      if (!guessLimit.allow(`${userId}:${m[1].toLowerCase()}`, now())) {
         throw new HttpError(429, 'rate_limited', 'Slow down: one guess per second.');
       }
-      const body = await readJson(request);
-      const guess = body.guess !== undefined ? body.guess : body.lat !== undefined ? { lat: body.lat, lng: body.lng } : null;
-      return { body: await service.submitGuess(userId, m[1], Number(m[2]), guess) };
+      const body = await readJsonObject(request);
+      // A missing "guess" is an error, not a skip: only an explicit null skips the round.
+      if (!('guess' in body)) throw new HttpError(400, 'bad_guess', 'Send {"guess": {"lat", "lng"}} or {"guess": null} to skip.');
+      return { body: await service.submitGuess(userId, m[1].toLowerCase(), Number(m[2]), body.guess) };
     }
     throw new HttpError(404, 'not_found', 'Not found.');
   }
 
   return async function handle(request) {
     const url = new URL(request.url);
-    const { userId, setCookie } = identify(request, url);
     let status = 200;
     let body;
+    let setCookie = null;
     try {
-      const out = await route(request, url, userId);
+      const identity = await identify(request, url);
+      setCookie = identity.setCookie;
+      const out = await route(request, url, identity.userId);
       status = out.status ?? 200;
       body = out.body;
     } catch (e) {

@@ -26,6 +26,8 @@ export function parseSettings(input, maxRounds) {
   return { rounds, time_limit_s: timeLimit, movement };
 }
 
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
 function parseGuess(g) {
   if (g === null || g === undefined) return null;
   const { lat, lng } = Object(g);
@@ -72,8 +74,12 @@ export function createGameService({
     round.deadline_at = round.ends_at ? round.ends_at + GRACE_MS : null;
   }
 
-  /** What the player may see before guessing: never coordinates. */
+  /**
+   * What the player may see before guessing: never coordinates. A round that has not been started
+   * (its clock has not begun) does not even reveal its panorama id.
+   */
   function publicRound(r) {
+    if (r.started_at === null) return { round_no: r.round_no, started_at: null };
     return {
       round_no: r.round_no,
       pano_id: r.pano_id,
@@ -111,6 +117,13 @@ export function createGameService({
     };
   }
 
+  function assertCurrent(cur, roundNo) {
+    if (roundNo === cur.round_no) return;
+    throw roundNo < cur.round_no
+      ? new HttpError(409, 'already_guessed', 'That round already has a guess.')
+      : new HttpError(409, 'round_not_started', 'That round is not the current one.');
+  }
+
   async function ownedGame(userId, id) {
     const game = await store.get(id);
     // Same answer for "missing" and "someone else's": no way to probe other games.
@@ -124,6 +137,7 @@ export function createGameService({
     },
 
     async startGame(userId, input = {}) {
+      if (!isPlainObject(input)) throw new HttpError(400, 'bad_json', 'Send a JSON object.');
       const map = mapsById.get(input.map_id ?? maps[0]?.id);
       if (!map) throw new HttpError(404, 'map_not_found', 'Map not found.');
       const settings = parseSettings(input.settings, map.locations.length);
@@ -135,14 +149,13 @@ export function createGameService({
         mode: 'classic',
         settings,
         status: 'in_progress',
+        // Snapshot: a later change to the map file must not change how this game is scored.
+        scale_km: map.scale_km,
         total_score: 0,
-        total_time_ms: 0,
         started_at: t,
-        finished_at: null,
         version: 0,
         rounds: sample(map.locations, settings.rounds).map((loc, i) => ({
           round_no: i + 1,
-          location_id: loc.id,
           pano_id: loc.pano_id,
           heading: loc.heading ?? 0,
           true_lat: loc.lat,
@@ -153,19 +166,76 @@ export function createGameService({
           deadline_at: null,
           guess_lat: null,
           guess_lng: null,
-          guessed_at: null,
           distance_km: null,
           score: null,
           formula_version: FORMULA_VERSION,
         })),
       };
-      beginRound(game.rounds[0]);
       await store.put(game);
       return view(game);
     },
 
     async getGame(userId, id) {
       return view(await ownedGame(userId, id));
+    },
+
+    /**
+     * Start the current round's clock. Called when the player actually sees the round, so time spent
+     * reading the previous result never counts. Idempotent: asking again returns the same round.
+     */
+    async startRound(userId, id, roundNo) {
+      const game = await ownedGame(userId, id);
+      if (game.status !== 'in_progress') {
+        throw new HttpError(409, 'game_finished', 'This game is finished.');
+      }
+      const cur = currentRound(game);
+      assertCurrent(cur, roundNo);
+      if (cur.started_at === null) {
+        beginRound(cur);
+        await store.put(game);
+      }
+      return { ...publicRound(cur), server_now: now() };
+    },
+
+    /**
+     * Swap the current round's panorama for another, once, when the player's browser could not load it
+     * (Google removed it since the location list was built). The caller names the panorama it failed on,
+     * so a stale or repeated request changes nothing. The new panorama gets a fresh clock. The old
+     * location is never revealed, and each round can be replaced only once, so this cannot be used to
+     * shop for an easier round more than one time per round.
+     */
+    async replaceRound(userId, id, roundNo, failedPanoId) {
+      const game = await ownedGame(userId, id);
+      if (game.status !== 'in_progress') {
+        throw new HttpError(409, 'game_finished', 'This game is finished.');
+      }
+      const cur = currentRound(game);
+      assertCurrent(cur, roundNo);
+      if (cur.started_at === null) {
+        throw new HttpError(409, 'round_not_started', 'Start the round before replacing it.');
+      }
+      if (cur.deadline_at !== null && now() > cur.deadline_at) {
+        throw new HttpError(409, 'deadline_passed', 'Time already ran out for that round.');
+      }
+      if (typeof failedPanoId !== 'string' || failedPanoId !== cur.pano_id) {
+        // Already replaced (a retry) or a made-up id: answer with the round as it is.
+        return { ...publicRound(cur), server_now: now() };
+      }
+      if (cur.replaced) {
+        throw new HttpError(409, 'already_replaced', 'This round was already replaced once.');
+      }
+      const map = mapsById.get(game.map_id);
+      const used = new Set(game.rounds.map((r) => r.pano_id).concat(game.dead_panos ?? []));
+      const spare = (map?.locations ?? []).filter((l) => !used.has(l.pano_id));
+      if (spare.length === 0) {
+        throw new HttpError(409, 'no_spare_location', 'No other location is available for this round.');
+      }
+      const [loc] = sample(spare, 1);
+      game.dead_panos = [...(game.dead_panos ?? []), cur.pano_id];
+      Object.assign(cur, { pano_id: loc.pano_id, heading: loc.heading ?? 0, true_lat: loc.lat, true_lng: loc.lng, replaced: true });
+      beginRound(cur);
+      await store.put(game);
+      return { ...publicRound(cur), server_now: now() };
     },
 
     /**
@@ -178,10 +248,9 @@ export function createGameService({
         throw new HttpError(409, 'game_finished', 'This game is finished.');
       }
       const cur = currentRound(game);
-      if (roundNo !== cur.round_no) {
-        throw roundNo < cur.round_no
-          ? new HttpError(409, 'already_guessed', 'That round already has a guess.')
-          : new HttpError(409, 'round_not_started', 'That round has not started yet.');
+      assertCurrent(cur, roundNo);
+      if (cur.started_at === null) {
+        throw new HttpError(409, 'round_not_started', 'Start the round before guessing.');
       }
       const guess = parseGuess(rawGuess);
       const t = now();
@@ -190,31 +259,23 @@ export function createGameService({
       if (late || guess === null) {
         cur.score = 0;
       } else {
-        const map = mapsById.get(game.map_id);
         cur.guess_lat = guess.lat;
         cur.guess_lng = guess.lng;
-        cur.guessed_at = t;
         cur.distance_km =
           Math.round(haversineKm(guess.lat, guess.lng, cur.true_lat, cur.true_lng) * 1000) / 1000;
-        cur.score = score(cur.distance_km, map.scale_km);
+        cur.score = score(cur.distance_km, game.scale_km ?? mapsById.get(game.map_id)?.scale_km);
       }
       game.total_score += cur.score;
-      game.total_time_ms += (cur.ends_at === null ? t : Math.min(t, cur.ends_at)) - cur.started_at;
 
       const next = currentRound(game);
-      if (next) {
-        beginRound(next);
-      } else {
-        game.status = 'finished';
-        game.finished_at = t;
-      }
+      if (!next) game.status = 'finished';
       await store.put(game);
 
       const result = {
         ...reveal(cur),
         total_score: game.total_score,
         finished: game.status === 'finished',
-        next: next ? publicRound(next) : null,
+        next_round_no: next ? next.round_no : null,
         server_now: t,
       };
       if (late) {

@@ -7,7 +7,8 @@ import { HttpError } from './errors.js';
 //   put(game) -> void          optimistic concurrency: game.version must match the stored one,
 //                              otherwise 409 'conflict'. New games start at version 0.
 
-function checkAndBump(games, game) {
+/** The stored copy of `game` bumped by one version, or a 409 if `game` is stale. Nothing is committed here. */
+function nextVersion(games, game) {
   const current = games.get(game.id);
   const expected = current ? current.version : 0;
   if (game.version !== expected) {
@@ -15,7 +16,7 @@ function checkAndBump(games, game) {
   }
   const next = structuredClone(game);
   next.version = expected + 1;
-  games.set(game.id, next);
+  return next;
 }
 
 export function createMemoryStore() {
@@ -26,21 +27,22 @@ export function createMemoryStore() {
       return g ? structuredClone(g) : null;
     },
     async put(game) {
-      checkAndBump(games, game);
+      const next = nextVersion(games, game);
+      games.set(next.id, next);
     },
   };
 }
 
-/** In-memory store persisted to one JSON file (fine for a few friends). */
+/** In-memory store persisted to one JSON file (fine for a few friends). A failed write changes nothing. */
 export function createFileStore(file) {
   const games = new Map();
   if (existsSync(file)) {
     for (const g of JSON.parse(readFileSync(file, 'utf8'))) games.set(g.id, g);
   }
-  function persist() {
+  function persist(all) {
     mkdirSync(dirname(file), { recursive: true });
     const tmp = `${file}.tmp`;
-    writeFileSync(tmp, JSON.stringify([...games.values()]));
+    writeFileSync(tmp, JSON.stringify([...all.values()]));
     renameSync(tmp, file);
   }
   return {
@@ -49,8 +51,9 @@ export function createFileStore(file) {
       return g ? structuredClone(g) : null;
     },
     async put(game) {
-      checkAndBump(games, game);
-      persist();
+      const next = nextVersion(games, game);
+      persist(new Map(games).set(next.id, next)); // disk first: if it throws, memory is untouched
+      games.set(next.id, next);
     },
   };
 }

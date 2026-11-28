@@ -1,0 +1,26 @@
+name = "guessgeo"
+main = "src/worker.js"
+compatibility_date = "2026-11-01"
+
+# Only the custom domain, behind Access: no public workers.dev or preview address.
+workers_dev = false
+preview_urls = false
+routes = [{ pattern = "guessgeo.margauxfaurie.com", custom_domain = true }]
+
+# Static files are served by Cloudflare; only /api/* runs the Worker.
+[assets]
+directory = "./public"
+run_worker_first = ["/api/*"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "guessgeo"
+database_id = "REPLACE_WITH_ID_FROM_wrangler_d1_create"
+migrations_dir = "migrations"
+
+[vars]
+# Cloudflare Zero Trust > Access > Applications: team domain and the application's AUD tag (both public identifiers).
+ACCESS_TEAM_DOMAIN = ""
+ACCESS_AUD = ""
+
+# Secret, set with `wrangler secret put GOOGLE_MAPS_API_KEY` (the browser key, restricted to the site's domain).
