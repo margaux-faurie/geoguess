@@ -69,9 +69,14 @@ export function createLanding(container, card) {
       card.hidden = true;
     };
     // The panel covers the left of the screen on wide layouts: keep the action to its right.
-    const padding = () => (innerWidth > 760
-      ? { left: Math.min(620, innerWidth * 0.45), right: 80, top: 80, bottom: 160 }
-      : { left: 40, right: 40, top: 40, bottom: 100 });
+    const panel = document.querySelector('.setup-panel');
+    const padding = () => {
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      if (innerWidth <= 760) return { left: 40, right: 40, top: 30, bottom: Math.min(110, h / 3) };
+      const left = Math.min(w - 260, Math.round(panel.getBoundingClientRect().right + 56));
+      return { left, right: 64, top: 64, bottom: Math.min(170, h / 3) };
+    };
 
     for (let i = 0; ; i = (i + 1) % ROUNDS.length) {
       const r = ROUNDS[i];
