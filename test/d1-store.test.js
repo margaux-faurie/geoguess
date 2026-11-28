@@ -13,7 +13,7 @@ try {
 // D1 is SQLite: wrap node:sqlite in the small slice of the D1 API the store uses.
 function fakeD1() {
   const sqlite = new DatabaseSync(':memory:');
-  for (const f of ['0001_init.sql', '0002_challenges.sql']) sqlite.exec(readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'));
+  for (const f of ['0001_init.sql', '0002_maps.sql', '0003_challenges.sql']) sqlite.exec(readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'));
   return {
     prepare(sql) {
       const stmt = sqlite.prepare(sql);

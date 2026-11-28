@@ -7,8 +7,11 @@ import { createD1Store } from './d1-store.js';
 import { createGameService } from './game.js';
 import { parseMaps } from './maps.js';
 
-/** @param {{ env: object, db: object, locations: unknown, fetchImpl?: typeof fetch, now?: () => number }} deps */
-export function createEdgeApp({ env, db, locations, fetchImpl, now }) {
+/**
+ * @param {{ env: object, db: object, maps?: Array, locations?: unknown, fetchImpl?: typeof fetch, now?: () => number }} deps
+ *   maps: already validated maps (from D1); locations: raw locations data to validate instead.
+ */
+export function createEdgeApp({ env, db, maps, locations, fetchImpl, now }) {
   const verify = createAccessVerifier({
     teamDomain: env.ACCESS_TEAM_DOMAIN,
     audience: env.ACCESS_AUD,
@@ -16,7 +19,7 @@ export function createEdgeApp({ env, db, locations, fetchImpl, now }) {
     now,
   });
   const service = createGameService({
-    maps: parseMaps(locations, 'data/locations.json'),
+    maps: maps ?? parseMaps(locations, 'locations'),
     store: createD1Store(db, now),
     now,
   });
