@@ -19,7 +19,7 @@ const json = (v) => b64url(new TextEncoder().encode(JSON.stringify(v)));
 
 function fakeD1() {
   const sqlite = new DatabaseSync(':memory:');
-  sqlite.exec(readFileSync(new URL('../migrations/0001_init.sql', import.meta.url), 'utf8'));
+  for (const f of ['0001_init.sql', '0002_challenges.sql']) sqlite.exec(readFileSync(new URL(`../migrations/${f}`, import.meta.url), 'utf8'));
   return {
     prepare(sql) {
       const stmt = sqlite.prepare(sql);

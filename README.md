@@ -20,6 +20,7 @@ The server owns the game: it picks the places, keeps their coordinates secret un
 3. **Pin it.** The map in the corner grows when you point at it. Click (or press <kbd>Enter</kbd> on the focused map) to drop your pin, then *Guess* or <kbd>Space</kbd>.
 4. **See how close you were.** The map fills the screen with your pin, the true place and the great-circle line between them, plus the distance and the score.
 5. **Next round,** with the button or <kbd>Enter</kbd>. After five rounds, a map shows every guess and every answer.
+6. **Challenge your friends.** Enter your name and share the link. Friends play the same five places with the same rules, and once they finish, everyone who has finished sees the scoreboard.
 
 ```mermaid
 flowchart LR
@@ -33,6 +34,9 @@ flowchart LR
   result -->|"rounds left"| start
   result -->|"round 5"| summary["Game over<br/>all rounds on one map"]
   summary --> setup
+  summary --> share["Challenge friends<br/>share a link"]
+  share --> friend["A friend plays<br/>the same five places"]
+  friend --> board["Scoreboard<br/>once they finish"]
 ```
 
 ## Fair-play promises
@@ -41,6 +45,7 @@ flowchart LR
 - **The server keeps the time.** Your clock starts when you open the round, not while you read the previous result. A guess arriving more than 2 seconds after the limit scores 0.
 - **One guess per round, in order.** Scores are computed once, on the server, in one place (`src/scoring.js`).
 - **A dead panorama is not your fault.** If Google has removed a place since the list was built, the round gets another place for free, once, with a fresh clock. The old place is never revealed.
+- **A challenge is the same game for everyone.** Same places, same rules, one game per player (enforced by a unique index), no panorama swaps. The scoreboard shows names and totals, never account ids, and only to players who have finished.
 - **Nobody can read your game.** A game belongs to your player id; any other id gets the same "not found" as a game that does not exist.
 
 The score for a miss of `d` km is `round(5000 × e^(−10·d / D))`, where `D` is the map's size (14,917 km for the World map). Within 25 m is a perfect 5,000; about 1,000 km away is worth about 2,500.
@@ -146,7 +151,7 @@ sequenceDiagram
 | Path | What lives there |
 |---|---|
 | [`src/scoring.js`](src/scoring.js) | Haversine distance and the score formula. The only place scores are computed. |
-| [`src/game.js`](src/game.js) | Game rules: picking places, round order, clocks, guesses, dead-panorama replacement. |
+| [`src/game.js`](src/game.js) | Game rules: picking places, round order, clocks, guesses, dead-panorama replacement, challenges and the scoreboard. |
 | [`src/app.js`](src/app.js) | The HTTP API: routes, rate limits, same-origin JSON checks, errors. Request in, Response out. |
 | [`src/maps.js`](src/maps.js) | Validation of `data/locations.json`. |
 | [`src/store.js`](src/store.js) | Memory and JSON-file stores for local play, with optimistic concurrency. |
@@ -185,6 +190,9 @@ sequenceDiagram
 | `POST /api/games/:id/rounds/:n/start` | Starts round `n`'s clock and returns its panorama. Idempotent. |
 | `POST /api/games/:id/rounds/:n/replace` | Swaps a dead panorama, once per round: `{failed_pano_id}`. |
 | `POST /api/games/:id/rounds/:n/guess` | `{guess: {lat, lng}}`, or `{guess: null}` to skip. Returns the result. |
+| `POST /api/games/:id/challenge` | Turns your finished game into a challenge: `{name}`. Returns `challenge_id`; the link is `/?c=<id>`. |
+| `GET /api/challenges/:id` | Who made it, the rules, how many have finished, and the scoreboard once you have finished. |
+| `POST /api/challenges/:id/join` | `{name}`. Your game in the challenge: a new one, or the one you already have. |
 
 Errors are JSON: `{error, message}`. Status codes: 400 bad input, 404 not yours or missing, 409 out of order or changed elsewhere, 410 too late (the body still carries the result), 429 too many requests.
 
@@ -218,7 +226,7 @@ flowchart LR
 ```
 
 1. `npx wrangler@4 d1 create guessgeo`, then put the returned id in `wrangler.toml`.
-2. `npx wrangler@4 d1 migrations apply guessgeo --remote`.
+2. `npx wrangler@4 d1 migrations apply guessgeo --remote`. Always before deploying new code: without `0002_challenges.sql`, every new game fails.
 3. In Zero Trust › Access › Applications, create an application for `guessgeo.margauxfaurie.com` only (not a wildcard: its audience tag would accept a token issued for any other subdomain), allow your friends, then fill `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` in `wrangler.toml`. Without them the API refuses every request.
 4. `npx wrangler@4 secret put GOOGLE_MAPS_API_KEY` (the browser key; add `https://guessgeo.margauxfaurie.com/*` to its allowed sites).
 5. Play one round with `npx wrangler@4 dev --remote`: the D1 store has been tested against Node's SQLite, not yet against Cloudflare's own result format.
@@ -228,7 +236,7 @@ flowchart LR
 
 **Tested in a browser (27–28 Nov 2026):** full games on the local server; all three movement modes; the timer running out; compass and *Back to start*; mouse and keyboard play; resume after a reload; result and game-over maps; a phone-size screen.
 
-**Not tested yet:** the replacement of a dead panorama in a browser (it needs a real dead one; the server side is tested), the Worker on Cloudflare, and real Google billing (watch the first day's usage).
+**Not tested yet:** challenges in a browser (server, API and D1 are tested), the replacement of a dead panorama in a browser (it needs a real dead one; the server side is tested), the Worker on Cloudflare, and real Google billing (watch the first day's usage).
 
 ## Known limits and next steps
 
@@ -237,4 +245,5 @@ flowchart LR
 - Local games live in one JSON file, rewritten on each change. Fine for a few players.
 - Abandoned games are never deleted yet; add a retention rule in D1 before opening the game beyond friends.
 - Rate limits on Cloudflare are per Worker instance, so approximate; Access and the per-address limit protect the Google quota.
-- Next: deploy, challenge links for friends, daily challenge, leaderboards. Design notes are in [`docs/design-notes.md`](docs/design-notes.md).
+- Challenges: names are not accounts, so a guest with a second browser can join twice; behind Cloudflare Access each person is one player.
+- Next: deploy, daily challenge, leaderboards. Design notes are in [`docs/design-notes.md`](docs/design-notes.md).

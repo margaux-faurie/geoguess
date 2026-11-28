@@ -150,3 +150,28 @@ test('a dead panorama can be replaced over HTTP', async () => {
     assert.equal(again.body.error, 'already_replaced');
   });
 });
+
+test('challenge over HTTP: create from a finished game, open, join with another player', async () => {
+  await withServer(async ({ call, clock, setCookie }) => {
+    const g = (await call('/api/games', { method: 'POST', body: '{}' })).body;
+    for (let n = 1; n <= g.rounds_total; n++) {
+      await call(`/api/games/${g.game_id}/rounds/${n}/start`, { method: 'POST', body: '{}' });
+      await call(`/api/games/${g.game_id}/rounds/${n}/guess`, { method: 'POST', body: '{"guess":{"lat":1,"lng":2}}' });
+      clock.t += 1500;
+    }
+    const c = await call(`/api/games/${g.game_id}/challenge`, { method: 'POST', body: '{"name":"Ana"}' });
+    assert.equal(c.status, 201);
+    const cid = c.body.challenge_id;
+
+    setCookie(''); // a different guest
+    const open = await call(`/api/challenges/${cid}`);
+    assert.equal(open.status, 200);
+    assert.equal(open.body.created_by, 'Ana');
+    assert.equal(open.body.board, null);
+    const join = await call(`/api/challenges/${cid}/join`, { method: 'POST', body: '{"name":"<b>Ben</b>"}' });
+    assert.equal(join.status, 201);
+    assert.equal(join.body.challenge_id, cid);
+    assert.equal((await call(`/api/challenges/${cid}/join`, { method: 'POST', body: '{"name":""}' })).status, 201, 'already in: resumes, name not needed again');
+    assert.equal((await call('/api/challenges/not-a-uuid')).status, 404);
+  });
+});

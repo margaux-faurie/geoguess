@@ -17,6 +17,7 @@ const state = {
   clockOffset: 0, // server time minus browser time, so the countdown matches the server
   pin: null, // { lat, lng }
   busy: false,
+  joining: null, // challenge id while the invite screen is shown
   timer: null,
 };
 let panorama;
@@ -61,7 +62,7 @@ async function api(path, init = {}) {
   const body = await res.json().catch(() => ({}));
   // 410 means time ran out: the body still carries the round's result, so it is not an error here.
   if (!res.ok && res.status !== 410) {
-    throw Object.assign(new Error(body.message || 'Something went wrong. Try again.'), { status: res.status });
+    throw Object.assign(new Error(body.message || 'Something went wrong. Try again.'), { status: res.status, code: body.error });
   }
   return { status: res.status, body };
 }
@@ -234,6 +235,8 @@ async function replaceDeadRound(round) {
     startRound(body);
   } catch (e) {
     notice(e.message, 'pano');
+    // In a challenge the place cannot be swapped: the round is skipped (0 points) for this player.
+    if (e.code === 'challenge_no_replace') return submit();
     if (e.status === 409) return resync();
     startTimer(round);
   }
@@ -347,15 +350,139 @@ function showSummary() {
       return li;
     }),
   );
+  renderChallenge();
 }
 
-function beginGame(view, resumed = false) {
-  state.game = {
+// ---- Challenges: friends play the same five places, then compare on a scoreboard ----
+
+const NAME_KEY = 'guessgeo:name';
+const savedName = () => { try { return localStorage.getItem(NAME_KEY) ?? ''; } catch { return ''; } };
+const saveName = (n) => { try { localStorage.setItem(NAME_KEY, n); } catch { /* storage can be blocked */ } };
+const challengeUrl = (id) => `${location.origin}/?c=${id}`;
+
+const canShare = () => Boolean(navigator.share) && matchMedia('(hover: none)').matches;
+
+function showShare(challengeId) {
+  $('#share-btn').textContent = canShare() ? 'Share link' : 'Copy link';
+  $('#challenge-form').hidden = true;
+  $('#share').hidden = false;
+  $('#share-link').value = challengeUrl(challengeId);
+}
+
+async function renderChallenge() {
+  $('#board-block').hidden = true;
+  $('#share').hidden = true;
+  $('#challenge-form').hidden = Boolean(state.game.challengeId);
+  $('#challenge-form').player.value = savedName();
+  const game = state.game;
+  if (!game.challengeId) return;
+  showShare(game.challengeId);
+  try {
+    const { body } = await api(`/api/challenges/${game.challengeId}`);
+    if (!body.board || state.game !== game || document.body.dataset.view !== 'summary') return;
+    $('#board').replaceChildren(
+      ...body.board.map((p) => {
+        const li = document.createElement('li');
+        li.classList.toggle('me', p.me);
+        li.dataset.rank = p.rank;
+        const who = document.createElement('span');
+        who.className = 'who';
+        who.textContent = p.name;
+        const pts = document.createElement('span');
+        pts.textContent = `${fmt(p.total_score)} points`;
+        li.append(who, pts);
+        return li;
+      }),
+    );
+    $('#board-block').hidden = false;
+  } catch (e) {
+    notice(e.message);
+  }
+}
+
+$('#challenge-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = e.currentTarget.player.value.trim();
+  const game = state.game; // the player may start another game while this request runs
+  try {
+    const { body } = await api(`/api/games/${game.id}/challenge`, { method: 'POST', body: JSON.stringify({ name }) });
+    saveName(name);
+    game.challengeId = body.challenge_id;
+    if (state.game !== game || document.body.dataset.view !== 'summary') return;
+    showShare(body.challenge_id);
+    $('#share-btn').focus();
+  } catch (err) {
+    notice(err.message);
+  }
+});
+
+$('#share-btn').addEventListener('click', async () => {
+  const url = $('#share-link').value;
+  try {
+    if (canShare()) {
+      await navigator.share({ title: 'Where is this?', text: 'Beat my score on these five places', url });
+      return;
+    }
+    await navigator.clipboard.writeText(url);
+    $('#share-btn').textContent = 'Copied';
+    setTimeout(() => { $('#share-btn').textContent = 'Copy link'; }, 2000);
+  } catch {
+    $('#share-link').select(); // clipboard blocked: leave it selected for a manual copy
+  }
+});
+
+// Opened from a challenge link: resume this player's game in it, show their summary, or invite them in.
+async function openChallenge(challengeId) {
+  const { body } = await api(`/api/challenges/${challengeId}`);
+  if (body.my_game_id) {
+    const { body: game } = await api(`/api/games/${body.my_game_id}`);
+    if (game.status === 'in_progress') return beginGame(game, true);
+    state.game = gameFrom(game);
+    state.results = game.results;
+    return showSummary();
+  }
+  state.joining = challengeId;
+  const s = body.settings;
+  const rules = [
+    s.movement === 'move' ? 'moving allowed' : s.movement === 'nomove' ? 'no moving' : 'no moving, panning or zooming',
+    s.time_limit_s ? `${s.time_limit_s} seconds a round` : 'no time limit',
+  ].join(', ');
+  $('#invite').textContent = `${body.created_by} challenged you: ${body.rounds_total} places, ${rules}. ${body.players} played so far.`;
+  $('#invite').hidden = false;
+  $('#name-field').hidden = false;
+  $('#movement-field').hidden = true;
+  $('#time-field').hidden = true;
+  const form = $('#setup-form');
+  form.player.required = true;
+  form.player.value = savedName();
+  form.querySelector('button').textContent = 'Play the challenge';
+  setView('setup');
+}
+
+function leaveChallengeInvite() {
+  state.joining = null;
+  $('#invite').hidden = true;
+  $('#name-field').hidden = true;
+  $('#movement-field').hidden = false;
+  $('#time-field').hidden = false;
+  const form = $('#setup-form');
+  form.player.required = false;
+  form.querySelector('button').textContent = 'Start';
+  history.replaceState(null, '', '/');
+}
+
+function gameFrom(view) {
+  return {
     id: view.game_id,
     settings: view.settings,
     total: view.total_score,
     roundsTotal: view.rounds_total,
+    challengeId: view.challenge_id ?? null,
   };
+}
+
+function beginGame(view, resumed = false) {
+  state.game = gameFrom(view);
   state.results = resumed ? view.results : [];
   state.clockOffset = view.server_now - Date.now();
   remember(view.game_id);
@@ -393,13 +520,22 @@ async function boot() {
     await loadGoogle(cfg.maps_key);
     await google.maps.importLibrary('streetView');
     initMaps();
+    const challengeId = new URLSearchParams(location.search).get('c');
+    if (challengeId && /^[0-9a-f-]{36}$/i.test(challengeId)) {
+      try {
+        return await openChallenge(challengeId.toLowerCase());
+      } catch (e) {
+        notice(e.status === 404 ? 'That challenge link does not exist.' : e.message);
+        if (e.status === 404) history.replaceState(null, '', '/');
+      }
+    }
     const lastId = remembered();
     if (lastId) {
       try {
         const { body } = await api(`/api/games/${lastId}`);
         if (body.status === 'in_progress') return beginGame(body, true);
         if (body.status === 'finished') {
-          state.game = { id: body.game_id, settings: body.settings, total: body.total_score, roundsTotal: body.rounds_total };
+          state.game = gameFrom(body);
           state.results = body.results;
           return showSummary();
         }
@@ -422,10 +558,23 @@ $('#setup-form').addEventListener('submit', async (e) => {
   notice('');
   setView('loading');
   try {
-    const { body } = await api('/api/games', {
-      method: 'POST',
-      body: JSON.stringify({ settings: { movement: form.movement.value, time_limit_s: Number(form.time.value) } }),
-    });
+    let body;
+    if (state.joining) {
+      const name = form.player.value.trim();
+      try {
+        ({ body } = await api(`/api/challenges/${state.joining}/join`, { method: 'POST', body: JSON.stringify({ name }) }));
+      } catch (err) {
+        if (err.code === 'challenge_full') leaveChallengeInvite(); // still free to play a normal game
+        throw err;
+      }
+      saveName(name);
+      state.joining = null;
+    } else {
+      ({ body } = await api('/api/games', {
+        method: 'POST',
+        body: JSON.stringify({ settings: { movement: form.movement.value, time_limit_s: Number(form.time.value) } }),
+      }));
+    }
     beginGame(body);
   } catch (err) {
     setView('setup');
@@ -448,6 +597,9 @@ document.addEventListener('keydown', (e) => {
     $('#next').click();
   }
 });
-$('#again').addEventListener('click', () => setView('setup'));
+$('#again').addEventListener('click', () => {
+  leaveChallengeInvite();
+  setView('setup');
+});
 
 boot();

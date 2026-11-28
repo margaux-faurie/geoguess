@@ -56,17 +56,21 @@
   <section id="setup" class="screen">
     <div class="panel">
       <h1 class="display">Where is this?</h1>
+      <p class="lead" id="invite" hidden></p>
       <p class="lead">Street View drops you somewhere. Pin where you think it is. Five rounds, and closer scores more.</p>
       <form id="setup-form">
         <div class="fields">
-          <label class="field">Movement
+          <label class="field" id="name-field" hidden>Your name
+            <input name="player" maxlength="20" autocomplete="nickname">
+          </label>
+          <label class="field" id="movement-field">Movement
             <select name="movement">
               <option value="move">Move around</option>
               <option value="nomove">No moving</option>
               <option value="nmpz">No moving, panning or zooming</option>
             </select>
           </label>
-          <label class="field">Time per round
+          <label class="field" id="time-field">Time per round
             <select name="time">
               <option value="0">No limit</option>
               <option value="30">30 seconds</option>
@@ -88,6 +92,29 @@
       <p class="lead" id="summary-max"></p>
       <div id="summary-map" class="summary-map" aria-label="Map of every round"></div>
       <ol class="route" id="summary-rounds"></ol>
+
+      <div id="board-block" hidden>
+        <h2 class="project">Scoreboard</h2>
+        <ol class="board" id="board"></ol>
+      </div>
+
+      <form id="challenge-form" class="challenge" hidden>
+        <p class="lead">Send these five places to friends and compare scores.</p>
+        <div class="fields">
+          <label class="field">Your name on the scoreboard
+            <input name="player" maxlength="20" required autocomplete="nickname">
+          </label>
+        </div>
+        <button type="submit" class="btn">Challenge friends</button>
+      </form>
+      <div id="share" class="challenge" hidden>
+        <p class="lead">Share this link. Friends play the same five places, then see the scoreboard.</p>
+        <div class="row share-row">
+          <input id="share-link" readonly aria-label="Challenge link">
+          <button type="button" class="btn" id="share-btn">Copy link</button>
+        </div>
+      </div>
+
       <button type="button" class="btn ink" id="again">Play again</button>
     </div>
   </section>
