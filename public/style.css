@@ -144,25 +144,25 @@ body[data-view="result"] .hint { display: none; }
 .landing-map { position: absolute; inset: 0; }
 .landing-map .maplibregl-ctrl-attrib { margin: 0 var(--space-3) var(--space-3) 0; }
 .setup-panel {
-  position: relative; z-index: 1; align-self: center; width: min(520px, calc(100% - 32px));
+  position: relative; z-index: 1; align-self: center; width: min(560px, calc(100% - 32px));
   margin: var(--space-12) 0 var(--space-12) clamp(16px, 5vw, 72px); padding: var(--space-8) var(--space-8) var(--space-6);
 }
-.title { font-weight: 800; font-size: clamp(52px, 8vw, 92px); letter-spacing: -0.035em; line-height: 0.92; font-variation-settings: "opsz" 96; }
+.title { font-weight: 800; font-size: clamp(48px, 6.4vw, 84px); letter-spacing: -0.035em; line-height: 0.92; font-variation-settings: "opsz" 96; }
 /* The question mark's dot is a pin that drops into place when the page opens. */
 .qmark { position: relative; display: inline-block; }
 .qhook { display: inline-block; clip-path: inset(0 0 30% 0); }
 .qpin {
-  position: absolute; left: 50%; bottom: 0.06em; width: 0.2em; height: 0.2em; margin-left: -0.1em;
+  position: absolute; left: 50%; bottom: 0.19em; width: 0.19em; height: 0.19em; margin-left: -0.11em;
   border-radius: var(--radius-pill); background: var(--second); border: 0.035em solid var(--paper);
   animation: pin-drop 0.7s cubic-bezier(.3, 1.6, .5, 1) 0.4s both;
 }
 @keyframes pin-drop { from { transform: translateY(-1.2em); opacity: 0; } 60% { opacity: 1; } to { transform: none; opacity: 1; } }
 
-.choice { margin: var(--space-6) 0 0; padding: 0; border: 0; }
+.choice { margin: var(--space-4) 0 0; padding: 0; border: 0; }
 .choice legend { padding: 0; margin-bottom: var(--space-2); font: 500 14px/1.2 var(--sans); }
 .option {
-  position: relative; display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4);
-  margin-top: var(--space-2); background: var(--paper); border: 1.5px solid transparent; border-radius: var(--radius-card); cursor: pointer;
+  position: relative; display: flex; align-items: center; gap: var(--space-3); padding: 10px var(--space-4);
+  margin-top: 6px; background: var(--paper); border: 1.5px solid transparent; border-radius: var(--radius-card); cursor: pointer;
 }
 .option input, .segments input { position: absolute; opacity: 0; pointer-events: none; }
 .option:has(input:checked) { border-color: var(--ink); }
@@ -183,7 +183,7 @@ body[data-view="result"] .hint { display: none; }
   border: 1.5px solid transparent; font: 500 15px/1.2 var(--sans);
 }
 .segments input:checked + span { background: var(--ink); color: var(--paper); }
-.go { margin-top: var(--space-8); padding: var(--space-4) var(--space-8); font-size: 18px; }
+.go { margin-top: var(--space-6); padding: var(--space-4) var(--space-8); font-size: 18px; }
 
 /* The demo's result, as a small card pinned to the bottom right of the map */
 .demo-card {
