@@ -1,0 +1,8 @@
+The files in this folder are not covered by the repository's licence.
+
+guessgeo-teaser.mp4 and guessgeo-teaser-poster.jpg are screen recordings of a real
+game on guessgeo.margauxfaurie.com (28 Nov 2026). They show:
+- Google Street View imagery, © Google, shown under Google's terms;
+- map tiles from OpenFreeMap / OpenMapTiles, data © OpenStreetMap contributors (ODbL).
+
+Everything else in them (cut, titles, layout) is © Margaux Faurie, all rights reserved.
