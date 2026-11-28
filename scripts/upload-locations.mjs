@@ -21,8 +21,13 @@ writeFileSync(out, mapsToSql(maps));
 const count = maps.reduce((n, m) => n + m.locations.length, 0);
 console.log(`Prepared ${maps.length} map(s), ${count} locations. Uploading to D1 (remote)...`);
 
-execFileSync('npx', ['wrangler@4', 'd1', 'execute', 'guessgeo', '--remote', '--file', out], {
-  stdio: 'inherit',
-  shell: process.platform === 'win32', // npx is a .cmd file on Windows
-});
-console.log('Done. The Worker picks the new locations up on its next start (a deploy, or within minutes).');
+// Fixed arguments only, and a relative path run from the repo root, so nothing is ever interpolated into a shell.
+const args = ['wrangler@4', 'd1', 'execute', 'guessgeo', '--remote', '--file', 'data/locations.sql'];
+const cwd = fileURLToPath(root);
+if (process.platform === 'win32') {
+  // npx is a .cmd script on Windows and Node no longer runs those without a shell: call cmd.exe explicitly.
+  execFileSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', ['npx', ...args].join(' ')], { stdio: 'inherit', cwd });
+} else {
+  execFileSync('npx', args, { stdio: 'inherit', cwd });
+}
+console.log('Done. A running Worker keeps the locations it started with: the next deploy, or a new isolate, picks these up.');
