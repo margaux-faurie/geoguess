@@ -56,18 +56,18 @@ Short answer: **nothing**, for a group of friends. Google gives a free allowance
 
 | What the game uses | Google SKU | Free each month | After that | How often guessgeo uses it |
 |---|---|---|---|---|
-| The panorama you look around in | Dynamic Street View | 5,000 | $14 per 1,000 | About 1 per round, so 5 per game |
+| The panorama you look around in | Dynamic Street View | 5,000 | $14 per 1,000 | 1 per page load: the game creates one viewer and reuses it for every round |
 | Finding the 200 places (`npm run locations`) | Street View Metadata | Unlimited | Free | A few hundred lookups, once, offline |
 | The guess map | none (OpenFreeMap, OpenStreetMap data) | Unlimited | Free | Every round, never billed by Google |
 | Loading the Maps JavaScript library | none on its own | | | Only the Street View viewer is created, no Google map |
 
-So the free 5,000 panoramas are about **1,000 games a month**, or 30 games a day.
+Google bills Dynamic Street View [per panorama object created](https://developers.google.com/maps/billing-and-pricing/sku-details/maps), not per move: walking around, turning, zooming and changing rounds inside the same page are not listed as billable. guessgeo creates that object once, on the first round, so a game costs one load, and a reload costs one more. The free 5,000 are thousands of games a month.
 
 **How it stays free, in three layers:**
 
 ```mermaid
 flowchart LR
-  play["A round starts"] --> pano["1 panorama load"]
+  play["A game opens"] --> pano["1 panorama object<br/>reused for all rounds"]
   pano --> cap{"Daily quota<br/>~150 loads"}
   cap -->|"under"| ok["Played, free<br/>150 × 30 days = 4,500,<br/>under the 5,000 free"]
   cap -->|"reached"| stop["Google stops serving<br/>until tomorrow: no bill"]
@@ -80,7 +80,7 @@ flowchart LR
 
 The keys are locked down too: the browser key only works for the Maps JavaScript API and only from `localhost:3000` and `guessgeo.margauxfaurie.com`; the server key only works for Street View metadata and never reaches a browser.
 
-**To check:** Google does not say exactly which Street View calls count (the first panorama, every change of panorama, or each move). The table assumes one per round. Watch the first days in Google Cloud › APIs & Services › Metrics, and lower the daily quota if a round turns out to count more than once.
+**To confirm on real usage:** Google's page names only the creation of the panorama object as billable; it does not say in so many words that moves are free. Compare a few days of Google Cloud › APIs & Services › Metrics with the number of games played. Keep the viewer reused: creating a new `StreetViewPanorama` per round would multiply the cost by five.
 
 ## How the repo works
 
