@@ -21,6 +21,6 @@ migrations_dir = "migrations"
 [vars]
 # Cloudflare Zero Trust > Access > Applications: team domain and the application's AUD tag (both public identifiers).
 ACCESS_TEAM_DOMAIN = "margauxfaurie.cloudflareaccess.com"
-ACCESS_AUD = ""
+ACCESS_AUD = "d33ff8799d1236aac11208417e679ffcc2fde394413cd3cce1c476e5a84a91a4"
 
 # Secret, set with `wrangler secret put GOOGLE_MAPS_API_KEY` (the browser key, restricted to the site's domain).
