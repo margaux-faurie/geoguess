@@ -6,7 +6,7 @@ guessgeo is a GeoGuessr-style game for friends. Street View drops you somewhere 
 
 The server owns the game: it picks the places, keeps their coordinates secret until you guess, runs the clock and computes every score. The browser only ever shows a panorama and sends a pin.
 
-**Status:** plays end to end on a local server, tested in a browser on desktop and phone sizes. The Cloudflare version (Worker, D1, Access) is built and tested in Node but not deployed yet. No npm dependencies, no build step, Node 20 or newer.
+**Status:** live at [guessgeo.margauxfaurie.com](https://guessgeo.margauxfaurie.com) since 28 Nov 2026, behind Cloudflare Access (invited people only). Tested in a browser on desktop and phone sizes, locally and online. No npm dependencies, no build step, Node 20 or newer.
 
 <p align="center">
   <img src="docs/assets/result.jpg" width="80%" alt="A round's result: the orange guess off Sumatra, a dashed line to the navy true place in Kuala Lumpur, and a card reading 931 km away, 2,679 points.">
@@ -239,7 +239,9 @@ To let a friend in, add their email to one of the Portfolio application's Allow 
 
 **Tested in a browser (27–28 Nov 2026):** full games on the local server; all three movement modes; the timer running out; compass and *Back to start*; mouse and keyboard play; resume after a reload; result and game-over maps; a phone-size screen.
 
-**Not tested yet:** the replacement of a dead panorama in a browser (it needs a real dead one; the server side is tested), the Worker on Cloudflare, and real Google billing (watch the first day's usage).
+**Online (28 Nov 2026):** a round played on guessgeo.margauxfaurie.com through Access, the Worker and D1 (game created, round started, guess scored).
+
+**Not tested yet:** the replacement of a dead panorama in a browser (it needs a real dead one; the server side is tested), and real Google billing (watch the first days' usage). The CSP is still report-only: online, two inline scripts that Cloudflare injects into the page show up as violations; allow them by hash or turn that feature off before enforcing.
 
 ## Known limits and next steps
 
