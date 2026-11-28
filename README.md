@@ -50,6 +50,38 @@ flowchart LR
 
 The score for a miss of `d` km is `round(5000 × e^(−10·d / D))`, where `D` is the map's size (14,917 km for the World map). Within 25 m is a perfect 5,000; about 1,000 km away is worth about 2,500.
 
+## What it costs
+
+Short answer: **nothing**, for a group of friends. Google gives a free allowance every month for each kind of call, and the game stays under it on purpose. Prices checked on 28 Nov 2026 on [Google's pricing page](https://developers.google.com/maps/billing/pricing).
+
+| What the game uses | Google SKU | Free each month | After that | How often guessgeo uses it |
+|---|---|---|---|---|
+| The panorama you look around in | Dynamic Street View | 5,000 | $14 per 1,000 | About 1 per round, so 5 per game |
+| Finding the 200 places (`npm run locations`) | Street View Metadata | Unlimited | Free | A few hundred lookups, once, offline |
+| The guess map | none (OpenFreeMap, OpenStreetMap data) | Unlimited | Free | Every round, never billed by Google |
+| Loading the Maps JavaScript library | none on its own | | | Only the Street View viewer is created, no Google map |
+
+So the free 5,000 panoramas are about **1,000 games a month**, or 30 games a day.
+
+**How it stays free, in three layers:**
+
+```mermaid
+flowchart LR
+  play["A round starts"] --> pano["1 panorama load"]
+  pano --> cap{"Daily quota<br/>~150 loads"}
+  cap -->|"under"| ok["Played, free<br/>150 × 30 days = 4,500,<br/>under the 5,000 free"]
+  cap -->|"reached"| stop["Google stops serving<br/>until tomorrow: no bill"]
+  ok --> budget["Budget alert<br/>email if anything is ever charged"]
+```
+
+1. **A daily quota** in Google Cloud (APIs & Services › Maps JavaScript API › Quotas) of about 150 panorama loads a day. A month of that is 4,500, under the 5,000 free, so even a busy month cannot be billed: on a heavy day Google stops showing panoramas instead of charging.
+2. **A budget alert** on the billing account, so any charge at all sends an email.
+3. **Limits in the game itself:** 30 new games an hour per player, 90 per address, and Cloudflare Access in front of the deployed game, so only invited friends can spend the quota.
+
+The keys are locked down too: the browser key only works for the Maps JavaScript API and only from `localhost:3000` and `guessgeo.margauxfaurie.com`; the server key only works for Street View metadata and never reaches a browser.
+
+**To check:** Google does not say exactly which Street View calls count (the first panorama, every change of panorama, or each move). The table assumes one per round. Watch the first days in Google Cloud › APIs & Services › Metrics, and lower the daily quota if a round turns out to count more than once.
+
 ## How the repo works
 
 The game rules are plain JavaScript with no Node imports, so the same files run in the local Node server and in a Cloudflare Worker. Only the edges change: where games are stored and who the player is.
@@ -136,11 +168,11 @@ sequenceDiagram
 
 ## Run it locally
 
-1. **Google Cloud:** create a project, link billing (a card is needed even inside the free monthly credit), and enable the **Maps JavaScript API** and the **Street View Static API**.
+1. **Google Cloud:** create a project, link billing (a card is needed even inside the free monthly allowance; see [What it costs](#what-it-costs)), and enable the **Maps JavaScript API** and the **Street View Static API**.
 2. **Two keys:**
    - a browser key, restricted to the Maps JavaScript API and to `http://localhost:3000/*` (plus the real domain later);
    - a server key, restricted to the Street View Static API, never sent to a browser.
-3. **Safeguards:** a budget alert, and a daily Street View quota (about 150 loads) so Google stops serving rather than billing.
+3. **Safeguards:** a budget alert, and a daily quota of about 150 panorama loads so Google stops serving rather than billing (see [What it costs](#what-it-costs)).
 4. `cp .env.example .env` and fill in both keys.
 5. `npm run locations` finds 200 real panoramas around the world and writes `data/locations.json`.
 6. `npm start`, then open http://localhost:3000.
