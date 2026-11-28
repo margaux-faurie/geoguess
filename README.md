@@ -107,7 +107,7 @@ flowchart LR
     access["access.js<br/>Cloudflare Access JWT"]
   end
 
-  locations[("data/locations.json<br/>secret coordinates")]
+  locations[("locations<br/>secret coordinates<br/>JSON locally, D1 online")]
 
   ui --> sv
   ui --> gm
@@ -158,6 +158,8 @@ sequenceDiagram
 | [`public/app.js`](public/app.js) | The client: views, Street View, rounds, results, keyboard. |
 | [`public/guessmap.js`](public/guessmap.js) | The guess map: MapLibre, markers, great-circle lines. |
 | [`scripts/build-locations.mjs`](scripts/build-locations.mjs) | Builds `data/locations.json` from Google's free Street View metadata. |
+| [`scripts/upload-locations.mjs`](scripts/upload-locations.mjs) | Sends `data/locations.json` to D1 (`npm run locations:upload`). |
+| [`src/d1-maps.js`](src/d1-maps.js) | Reads the maps from D1 for the Worker, and writes the upload SQL. |
 | [`migrations/`](migrations) | D1 schema. |
 | [`test/`](test) | Node test runner: rules, API over HTTP, stores, Access, hardening. |
 
@@ -196,7 +198,7 @@ Errors are JSON: `{error, message}`. Status codes: 400 bad input, 404 not yours 
 - **Identity:** locally, a random id in an `HttpOnly`, `SameSite=Lax` cookie (`__Host-` and `Secure` over HTTPS). On Cloudflare, a verified Access token for one application audience; nothing else is trusted.
 - **Headers:** `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, and a Content Security Policy that lists every host the page uses. The CSP is report-only until the console is clean with the live Google scripts; then rename it to `Content-Security-Policy`.
 - **Third-party code:** MapLibre is pinned (5.24.1) and loaded with a Subresource Integrity hash, so a changed file is refused. To upgrade, change the version in `public/index.html` and recompute both hashes.
-- **Secrets:** keys live in `.env` locally and in Wrangler secrets on Cloudflare. `data/locations.json` holds the answers: it is gitignored and never served from `public/`.
+- **Secrets:** keys live in `.env` locally and in Wrangler secrets on Cloudflare. `data/locations.json` holds the answers: it is gitignored, never served from `public/`, and online it lives only in D1, never in the deployed code.
 
 ## Maps and terms
 
@@ -206,23 +208,32 @@ The Google billing account is in France, so the Google Maps Platform EEA terms a
 
 ## Deploying to Cloudflare (guessgeo.margauxfaurie.com)
 
-The API runs as a Worker, games live in D1, players are identified by Cloudflare Access. `data/locations.json` is bundled at deploy time and stays out of git, so deploy from the machine that generated it.
+The API runs as a Worker, games and locations live in D1, players are identified by Cloudflare Access. The Worker is connected to this repo (Workers Builds): **every push to `main` deploys**. The locations hold the answers, so they never go through git: you upload them to D1 once from your machine, and the Worker reads them at start.
 
 ```mermaid
 flowchart LR
-  d1["1. Create D1<br/>wrangler d1 create"] --> mig["2. Apply migrations<br/>--remote"]
-  mig --> acc["3. Access app<br/>this hostname only"]
-  acc --> key["4. Secret<br/>GOOGLE_MAPS_API_KEY"]
-  key --> check["5. Try one game<br/>wrangler dev --remote"]
-  check --> deploy["6. wrangler deploy"]
+  subgraph once["Once, from your machine"]
+    d1["1. Create D1"] --> mig["2. Migrations"]
+    mig --> up["3. Upload locations<br/>npm run locations:upload"]
+    up --> key["4. Secret<br/>GOOGLE_MAPS_API_KEY"]
+  end
+  subgraph every["Every change"]
+    push["git push to main"] --> build["Workers Builds<br/>deploys the Worker"]
+  end
+  key --> push
+  build --> site["guessgeo.margauxfaurie.com<br/>behind Access"]
 ```
 
-1. `npx wrangler@4 d1 create guessgeo`, then put the returned id in `wrangler.toml`.
-2. `npx wrangler@4 d1 migrations apply guessgeo --remote`.
-3. Access: the game sits behind the existing **Portfolio** Access application (`*.margauxfaurie.com`), like the rest of the site. `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` in `wrangler.toml` are that application's team domain and AUD tag. To let a friend in, add their email to one of that application's Allow policies (it then opens every subdomain the Portfolio application protects). Without these two values the API refuses every request.
-4. `npx wrangler@4 secret put GOOGLE_MAPS_API_KEY` (the browser key; add `https://guessgeo.margauxfaurie.com/*` to its allowed sites).
-5. Play one round with `npx wrangler@4 dev --remote`: the D1 store has been tested against Node's SQLite, not yet against Cloudflare's own result format.
-6. `npx wrangler@4 deploy`. `wrangler.toml` declares the custom domain and turns off the public workers.dev and preview addresses.
+| Step | Command or place | Done |
+|---|---|---|
+| 1. Create the database | `npx wrangler@4 d1 create guessgeo`, id in `wrangler.toml` | ✓ 28 Nov |
+| 2. Create the tables | `npx wrangler@4 d1 migrations apply guessgeo --remote` (again after any new migration, **before** pushing the code that needs it) | 0001 ✓, 0002 to run |
+| 3. Send the locations | `npm run locations:upload` (after each `npm run locations`) | to run |
+| 4. Google key | `npx wrangler@4 secret put GOOGLE_MAPS_API_KEY` (the browser key), and `https://guessgeo.margauxfaurie.com/*` in its allowed sites | ✓ 28 Nov |
+| 5. Access | the existing **Portfolio** application (`*.margauxfaurie.com`); its team domain and AUD tag are in `wrangler.toml` | ✓ 28 Nov |
+| 6. Deploy | push to `main` (or `npx wrangler@4 deploy` by hand) | on each push |
+
+To let a friend in, add their email to one of the Portfolio application's Allow policies (it then opens every subdomain that application protects). Without the Access values the API refuses every request; without locations in D1 it answers 503 "The service is not configured" and starts as soon as they are uploaded, no redeploy needed. `wrangler.toml` declares the custom domain and turns off the public workers.dev and preview addresses.
 
 ## Tested and not yet tested
 

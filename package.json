@@ -4,10 +4,13 @@
   "private": true,
   "description": "A GeoGuessr-style game for friends. Zero dependencies.",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node src/server.js",
     "locations": "node scripts/build-locations.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "locations:upload": "node scripts/upload-locations.mjs"
   }
 }
