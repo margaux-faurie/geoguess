@@ -199,6 +199,7 @@ body[data-view="result"] .hint { display: none; }
   .landing-map { position: relative; inset: auto; flex: none; height: 38vh; min-height: 220px; order: -1; }
   .setup-panel { margin: -40px auto var(--space-8); width: calc(100% - 24px); padding: var(--space-6); }
   .demo-card { top: calc(38vh - 110px); bottom: auto; right: var(--space-3); }
+  .landing-map .maplibregl-ctrl-bottom-right { bottom: 44px; } /* clear of the panel's overlap */
 }
 @media (prefers-reduced-motion: reduce) { .qpin { animation: none; } }
 
